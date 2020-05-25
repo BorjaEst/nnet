@@ -1,8 +1,8 @@
 %%%-------------------------------------------------------------------
-%% @doc enn public API
+%% @doc nnet public API
 %% @end
 %%%-------------------------------------------------------------------
--module(enn_app).
+-module(nnet_app).
 -author("borja").
 -behaviour(application).
 
@@ -16,9 +16,8 @@
 %%--------------------------------------------------------------------
 start(_StartType, _StartArgs) ->
     true = new_table(network, network:record_fields()),
-    true = new_table( neuron,  neuron:record_fields()),
     true = new_table(   link,    link:record_fields()),
-    enn_sup:start_link().
+    nnet_sup:start_link().
 
 %%--------------------------------------------------------------------
 stop(_State) ->

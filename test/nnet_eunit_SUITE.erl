@@ -5,7 +5,7 @@
 %%%
 %%% Created :
 %%%-------------------------------------------------------------------
--module(eunit_enn_SUITE).
+-module(eunit_nnet_SUITE).
 -compile([export_all, nowarn_export_all]).
 
 -include_lib("common_test/include/ct.hrl").

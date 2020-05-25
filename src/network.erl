@@ -372,8 +372,16 @@ add_links(NN,     []) -> NN.
       NN0   :: network(),
       Links :: [link:link()],
       NN1   :: network().
-del_link(NN, {N1, N2}) -> 
-    remove_link(NN, N1, N2).
+del_link(NN_0, {N1, N2}) -> 
+    NN_1 = remove_link(NN_0, N1, N2),
+    case find_path(NN_1, start, N2) of
+        not_found -> error({nnet_broken, no_path, #{start=>N2}});
+        _Path     -> 
+            case find_path(NN_1, N1, 'end') of
+                not_found -> error({nnet_broken, no_path, #{N1=>'end'}});
+                _Path     -> NN_1
+            end
+    end.
 
 %%-------------------------------------------------------------------
 %% @doc Deletes the links using lists of neurons. 

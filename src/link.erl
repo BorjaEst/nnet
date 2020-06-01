@@ -8,27 +8,16 @@
 -compile([export_all, nowarn_export_all]). %% TODO: To delete after buil
 
 -export([]).
--export_type([link/0, weight/0]).
+-export_type([from/0, to/0, weight/0]).
 
--type link()   :: {From :: neuron:id(), To :: neuron:id()}.
--type id()     :: {link(), link}.
--type weight() :: float() | undefined.
--record(link, {
-    id :: id(),
-    w  :: weight()
-}).
+-type from()   :: term().
+-type to()     :: term().
+-type weight() :: number() | undefined.
 
 
 %%%===================================================================
 %%% API
 %%%===================================================================
-
-%%-------------------------------------------------------------------
-%% @doc Record fields from link.  
-%% @end
-%%-------------------------------------------------------------------
--spec record_fields() -> ListOfFields :: [atom()].
-record_fields() -> record_info(fields, link).
 
 %%-------------------------------------------------------------------
 %% @doc Returns the links weights.
@@ -39,9 +28,9 @@ record_fields() -> record_info(fields, link).
     From :: neuron:id(),
     To   :: neuron:id().
 read({From, To}) -> 
-    case mnesia:read(link, id(From,To)) of 
-        [L] -> weight(L);
-        []  -> undefined
+    case mnesia:read({link, {From,To}}) of 
+        [{_,_,Weight}] -> Weight;
+        []             -> undefined
     end.
 
 %%-------------------------------------------------------------------
@@ -49,24 +38,25 @@ read({From, To}) ->
 %% Should run inside a mnesia transaction.
 %% @end
 %%------------------------------------------------------------------
--spec write(Link :: {From, To}, Weight :: weight()) -> ok when
-    From :: neuron:id(),
-    To   :: neuron:id().
-write({From, To}, W) -> 
-    ok = mnesia:write(#link{id=id(From,To), w=W}).
+-spec write(Link, Weight) -> Link when
+    Link   :: {from(), to()},
+    Weight :: weight().
+write({From, To}, Weight) -> 
+    ok = mnesia:write({link,{From,To}, Weight}),
+    {From, To}.
 
 %%-------------------------------------------------------------------
 %% @doc Adds a specific value to the previous weight.
 %% Should run inside a mnesia transaction.
 %% @end
 %%------------------------------------------------------------------
--spec add(Link :: {From, To}, Value :: float()) -> ok when
-    From :: neuron:id(),
-    To   :: neuron:id().
+-spec add(Link, Value) -> Link when
+    Link  :: {from(), to()},
+    Value :: weight().
 add({From, To}, V) -> 
-    case read({From, To}) of 
-        W when is_float(W) -> write({From, To}, W + V);
-        undefined          -> write({From, To}, V)
+    case mnesia:wread({link, {From, To}}) of 
+        [{_,_,Weight}] -> write({From, To}, Weight + V);
+        []             -> write({From, To}, V)
     end.
 
 %%-------------------------------------------------------------------
@@ -74,90 +64,100 @@ add({From, To}, V) ->
 %% Should run inside a mnesia transaction. 
 %% @end
 %%------------------------------------------------------------------
--spec delete(Link :: {From, To}) -> ok when
-    From :: neuron:id(),
-    To   :: neuron:id().
+-spec delete(Link) -> ok when
+    Link   :: {from(), to()}.
 delete({From, To}) ->
-    ok = mnesia:delete(link, id(From,To), write).
+    ok = mnesia:delete({link, {From, To}}),
+    {From, To}.
 
 %%-------------------------------------------------------------------
-%% @doc Clones a link replacing the From and To ids using a map.
+%% @doc Maps a link from a tuple {From,To}.
+%% @end
+%%------------------------------------------------------------------
+-spec map(Link1, #{Old => New}) -> Link2 when 
+    Link1 :: {Old::from(), Old::to()},
+    Link2 :: {New::from(), New::to()},
+    Old   :: from() | to(),
+    New   :: from() | to().
+map({From, To}, Map) ->
+    {maps:get(From, Map, From), maps:get(To, Map, To)}.
+
+%%-------------------------------------------------------------------
+%% @doc Copies a link replacing the From and To ids using a map. 
+%% Returns the maped link.
 %% Should run inside a mnesia transaction.
 %% @end
 %%-------------------------------------------------------------------
--spec clone(Link :: {From, To}, #{Old => New}) -> ok when 
-    From :: neuron:id(),
-    To   :: neuron:id(),
-    Old  :: neuron:id(),
-    New  :: neuron:id().
-clone({From, To}, Map) -> 
+-spec copy(Link1, #{Old => New}) -> Link2 when 
+    Link1 :: {Old::from(), Old::to()},
+    Link2 :: {New::from(), New::to()},
+    Old   :: from() | to(),
+    New   :: from() | to().
+copy({From, To}, Map) -> 
     case read({From, To}) of 
         W when is_float(W) -> write(map({From, To}, Map), W);
-        undefined          -> ok
+        undefined          -> map({From, To}, Map)
     end.
 
 %%-------------------------------------------------------------------
-%% @doc Moves the links using a map.
+%% @doc Moves the links using a map. Returns the maped link.
 %% Should run inside a mnesia transaction.
 %% @end
 %%-------------------------------------------------------------------
--spec move(Links :: {From, To}, #{Old => New}) -> ok when 
-    From :: neuron:id(),
-    To   :: neuron:id(),
-    Old  :: neuron:id(),
-    New  :: neuron:id().
+-spec move(Link1, #{Old => New}) -> Link2 when 
+    Link1 :: {Old::from(), Old::to()},
+    Link2 :: {New::from(), New::to()},
+    Old   :: from() | to(),
+    New   :: from() | to().
 move({From, To}, Map) -> 
-    clone({From, To}, Map),
-    delete({From, To}).
+    NewLink = copy({From, To}, Map),
+    delete({From, To}),
+    NewLink.
 
 %%-------------------------------------------------------------------
-%% @doc Merges the links using a map.
+%% @doc Merges the links using a map. Returns the maped link.
 %% Should run inside a mnesia transaction.
 %% @end
 %%-------------------------------------------------------------------
--spec merge(Links :: {From, To}, #{Old => New}) -> ok when 
-    From :: neuron:id(),
-    To   :: neuron:id(),
-    Old  :: neuron:id(),
-    New  :: neuron:id().
+-spec merge(Link1, #{Old => New}) -> Link2 when 
+    Link1 :: {Old::from(), Old::to()},
+    Link2 :: {New::from(), New::to()},
+    Old   :: from() | to(),
+    New   :: from() | to().
 merge({From, To}, Map) -> 
     case read({From, To}) of 
         W when is_float(W) -> 
-            add(map({From, To}, Map), W),
-            delete({From, To});
-        undefined          -> ok
+            delete({From, To}),
+            add(map({From, To}, Map), W);
+        undefined          -> 
+            map({From, To}, Map)
     end.
 
 %%-------------------------------------------------------------------
-%% @doc Merges the links using a map.
+%% @doc Moves the 50% of the weights on the last mapped connections. 
+%% Returns the maped link.
 %% Should run inside a mnesia transaction.
 %% @end
 %%-------------------------------------------------------------------
--spec divide(Links :: {From, To}, #{Old => New}) -> ok when 
-    From :: neuron:id(),
-    To   :: neuron:id(),
-    Old  :: neuron:id(),
-    New  :: neuron:id().
+-spec divide(Link1, #{Old => New}) -> Link2 when 
+    Link1 :: {Old::from(), Old::to()},
+    Link2 :: {New::from(), New::to()},
+    Old   :: from() | to(),
+    New   :: from() | to().
 divide({From, To}, Map) -> 
-    case read({From, To}) of 
-        W when is_float(W) -> 
-            add(map({From, To}, Map), W/2.0),
-            write({From, To}, W)/2.0;
-        undefined          -> ok
-    end.
-
+    MapedLink = map({From, To}, Map),
+    case mnesia:wread({link, {From, To}}) of 
+        [{_,_,W}] when is_map_key(To, Map) -> 
+            add(MapedLink, W); 
+        [{_,_,W}] -> 
+            write({From, To}, W/2.0),
+            add(MapedLink, W/2.0);
+        [] -> 
+            nothing
+    end,
+    MapedLink.
 
 %%====================================================================
 %% Internal functions
 %%====================================================================
-
-% Returns the link id from it From and To ---------------------------
-id(From, To) -> {{From,To}, link}.
-
-% Returns the link weight or undefined in any other case ------------
-weight(#link{w=W}) -> W;
-weight(         _) -> undefined.
-
-% Maps a link from a tuple {From,To} --------------------------------
-map({From,To}, Map) -> {maps:get(From,Map,From),maps:get(To,Map,To)}.
 

@@ -1,112 +1,49 @@
 %%%-------------------------------------------------------------------
-%%% @author borja
-%%% @doc
-%%%
+%%% @doc Module to manage network graph.
 %%% @end
 %%%-------------------------------------------------------------------
 -module(network).
 
--export([new/0, new/1, id/1, clone/1]).
--export([record_fields/0, info/1, to_map/1]).
+-export([record_fields/0, new/0, copy/1, concat/2, rename/2]).
+-export([key/1, info/1, to_map/1, from_map/1]).
 -export([no_neurons/1, neurons/1, connections/2]).
 -export([sink_neurons/1, bias_neurons/1]).
 
--export([add_neuron/2, add_neurons/2, del_neuron/2, del_neurons/2]).
+-export([add_neuron/2, del_neuron/2]).
 -export([in_degree/1, in_nodes/1, out_degree/1, out_nodes/1]).
 -export([in_degree/2, in_nodes/2, out_degree/2, out_nodes/2]).
 
--export([add_link/2, add_links/2, del_link/2, del_links/2]).
--export([move_link/3, move_links/3]).
+-export([add_link/2, del_link/2, move_link/3, path/2]).
 -export([in_links/1, out_links/1, links/1, no_links/1]).
 -export([in_links/2, out_links/2, links/2, no_links/2]).
 
--export_type([network/0, connections/0, d_type/0, d_node/0, info/0]).
+-export_type([network/0, connections/0, d_node/0, info/0]).
 
--type id()      :: {reference(), network}.
--define(NEW_ID, {make_ref(), network}).
--type d_type()  :: 'sequential' | 'recurrent'.
 -type d_node()  :: neuron:id() | 'start' | 'end'.
 -record(cn, {
     in  = #{} :: #{d_node() => link},
     out = #{} :: #{d_node() => link}
 }).
+-define( IN(CN), element(#cn.in,  CN)).
+-define(OUT(CN), element(#cn.out, CN)).
 -record(network, {
-    id = ?NEW_ID :: id(),
-    nodes :: #{d_node() => #{d_node() => #cn{}}},
-    type  :: d_type()
+    key = make_ref() :: reference(),
+    nodes        :: #{d_node() => #{d_node() => #cn{}}},
+    inputs  = [] :: [neuron:id()], %Keeps the inputs order
+    outputs = [] :: [neuron:id()]  %Keeps the outputs order
 }).
 -type network() :: #network{}.
-
 -type connections() :: #{in  => #{d_node() => link},
                          out => #{d_node() => link}}.
--type info()    :: #{'type' =>    Type :: d_type(),
-                     'size' => NoWords :: non_neg_integer()}.
+-type info() :: #{'size'        => non_neg_integer(),
+                  'connections' => non_neg_integer(),
+                  'n_inputs'    => non_neg_integer(),
+                  'n_outputs'   => non_neg_integer()}.
 
 
 %%%===================================================================
 %%% API
 %%%===================================================================
-
-%%-------------------------------------------------------------------
-%% @doc Creates a new network.  
-%% @end
-%%-------------------------------------------------------------------
--spec new() -> network().
-new() -> new(recurrent).
-
--spec new(Type) -> network() when
-      Type :: d_type().
-new(Type) ->
-    case check_type(Type) of
-        ok -> #network{type=Type, nodes=start_nodes()};
-        _  -> erlang:error(badarg)
-    end.
-
-check_type(sequential) -> ok;
-check_type( recurrent) -> ok;
-check_type(         _) -> error.
-
-start_nodes() -> #{'start'=>#cn{},'end'=>#cn{}}.
-
-%%--------------------------------------------------------------------
-%% @doc Returns the network id.
-%% @end
-%%-------------------------------------------------------------------
--spec id(Network :: network()) -> id().
-id(NN) -> NN#network.id.
-
-%%-------------------------------------------------------------------
-%% @doc Clones a link replacing the From and To ids using a map.
-%% Should run inside a mnesia transaction.
-%% @end
-%%-------------------------------------------------------------------
--spec clone(Network :: network()) -> network().
-clone(NN) ->
-    NMap  = clone_neurons(neurons(NN), #{}),
-    Nodes = replace(NN#network.nodes, NMap),
-    [link:clone({From,To}, NMap) || {From,To} <- network:links(NN)],
-    NN#network{id=?NEW_ID, nodes=Nodes}.
-
-clone_neurons([N1_id | Ns], NMap) -> 
-    [N1] = mnesia:read(neuron, N1_id),
-     N2  = neuron:clone(N1),
-     ok  = mnesia:write(N2),
-    clone_neurons(Ns, NMap#{N1_id => neuron:id(N2)});
-clone_neurons([], NMap) -> NMap. 
-
-replace(Nodes, NMap) -> 
-    maps:from_list([{maps:get(N,NMap,N), replace_conn(Conn,NMap)} 
-        || {N,Conn} <- maps:to_list(Nodes)]).
-
-replace_conn(Conn, NMap) -> 
-    #cn{
-        in  = replace_map( Conn#cn.in, NMap),
-        out = replace_map(Conn#cn.out, NMap)
-    }.
-
-replace_map(Map, NMap) -> 
-    maps:from_list([{maps:get(Node, NMap, Node),Value} 
-        || {Node,Value} <- maps:to_list(Map)]).
 
 %%-------------------------------------------------------------------
 %% @doc Record fields from network.  
@@ -116,94 +53,141 @@ replace_map(Map, NMap) ->
 record_fields() -> record_info(fields, network).
 
 %%-------------------------------------------------------------------
+%% @doc Creates a new network.  
+%% @end
+%%-------------------------------------------------------------------
+-spec new() -> network().
+new() -> #network{nodes=#{'start'=>#cn{},'end'=>#cn{}}}.
+
+%%--------------------------------------------------------------------
+%% @doc Returns the network id.
+%% @end
+%%-------------------------------------------------------------------
+-spec key(Network :: network()) -> reference().
+key(NN) -> NN#network.key.
+
+%%-------------------------------------------------------------------
+%% @doc Returns a copy of the network with a different id.
+%% @end
+%%-------------------------------------------------------------------
+-spec copy(Network :: network()) -> network().
+copy(NN) -> NN#network{key=make_ref()}.
+
+%%-------------------------------------------------------------------
+%% @doc Concatenates networks NN1 and NN2 connecting each output from
+%% NN1 to each input of NN2.
+%% Note the id of network 3 is different form 1 & 2.
+%% @end
+%%-------------------------------------------------------------------
+-spec concat(NN1, NN2) -> NN3 when
+    NN1 :: network(),
+    NN2 :: network(),
+    NN3 :: network().
+concat(NN1, NN2) -> 
+    NN1_aux = del_neuron('end', NN1),
+    NN2_aux = del_neuron(start, NN2),
+    NN3_aux = #network{
+        key = make_ref(),
+        nodes = maps:merge(NN1_aux#network.nodes, NN2_aux#network.nodes),
+        inputs  = in_nodes(NN1),
+        outputs = out_nodes(NN2)
+    },
+    lists:foldl(fun add_link/2, NN3_aux, 
+        [{O1,I2} || O1 <- out_nodes(NN1), I2 <- in_nodes(NN2)]
+    ).
+
+%%-------------------------------------------------------------------
+%% @doc Renames the map nodes in the network.
+%% @end
+%%-------------------------------------------------------------------
+-spec rename(NN1, NMap) -> NN2 when
+    NN1  :: network(),
+    NN2  :: network(),
+    NMap :: #{Old::d_node() => New::d_node()}.
+rename(NN, NMap) -> 
+    maps:from_list([{maps:get(N,NMap,N), rename_conn(Conn,NMap)} 
+        || {N,Conn} <- maps:to_list(NN#network.nodes)]).
+rename_conn(Conn, NMap) -> 
+    #cn{
+        in  = replace_map( Conn#cn.in, NMap),
+        out = replace_map(Conn#cn.out, NMap)
+    }.
+replace_map(Map, NMap) -> 
+    maps:from_list([{maps:get(Node, NMap, Node),Value} 
+        || {Node,Value} <- maps:to_list(Map)]).
+
+%%-------------------------------------------------------------------
 %% @doc Information from the network.  
 %% @end
 %%-------------------------------------------------------------------
 -spec info(NN :: network()) -> info().
 info(#network{} = NN) ->
-    Type = NN#network.type,
-    Size = no_neurons(NN),
-    #{type=>Type, size=>Size}.
-
-%%-------------------------------------------------------------------
-%% @doc Return a network in a map format. 
-%% @end
-%%-------------------------------------------------------------------
--spec to_map(NN) -> NN_Map when
-    NN     :: network(),
-    NN_Map :: #{id    => network:id(),
-                nodes => #{d_node() => connections()},
-                type  => d_type()}.
-    
-to_map(NN) ->
     #{
-        id    => NN#network.id,
-        nodes => maps:map(fun map_nodes/2, NN#network.nodes),
-        type  => NN#network.type
+        size        => no_neurons(NN),
+        connections => no_links(NN),
+        n_inputs    => in_degree(NN),
+        n_outpues   => out_degree(NN)
     }.
 
 %%-------------------------------------------------------------------
-%% @doc Adds a neuron to the network.  
-%%
-%% TODO: A neuron must have at least 1 direct input
+%% @doc Return a network in a map format. Note this process losses 
+%% information such the order of inputs and outputs.
 %% @end
 %%-------------------------------------------------------------------
--spec add_neuron(NN1, N) -> NN2 when
-      NN1 :: network(),
-      NN2 :: network(),
-      N   :: neuron:id().
-add_neuron(#network{nodes=Nodes} = NN, N) ->
+-spec to_map(network()) -> #{From::d_node() => [To::d_node()]}.
+to_map(NN) ->
+    maps:map(fun(_,CN) -> maps:keys(?OUT(CN)) end, NN#network.nodes).
+
+%%-------------------------------------------------------------------
+%% @doc Creates a new network from a map.  
+%% @end
+%%-------------------------------------------------------------------
+-spec from_map(#{From::d_node() => [To::d_node()]}) -> network().
+from_map(Map) -> 
+    NN = lists:foldl(fun add_neuron/2, new(), maps:keys(Map)),
+    lists:foldl(fun add_link/2, NN, 
+        [{From,To} || From <- maps:keys(Map), To <- map_get(From, Map)]
+    ).
+
+%%-------------------------------------------------------------------
+%% @doc Adds a neuron to the network.  
+%% @end
+%%-------------------------------------------------------------------
+-spec add_neuron(N, NN1) -> NN2 when
+    N   :: neuron:id(),
+    NN1 :: network(),
+    NN2 :: network().
+add_neuron(N, #network{nodes=Nodes} = NN) ->
+    %% TODO: Raise error if already in?
     NN#network{
         nodes = Nodes#{N => #cn{}}
     }.
 
 %%-------------------------------------------------------------------
-%% @doc Adds a list of neurons to the network.  
-%% @end
-%%-------------------------------------------------------------------
--spec add_neurons(NN0, Ns) -> NN when
-      NN0 :: network(),
-      NN  :: network(),
-      Ns  :: [neuron:id()].
-add_neurons(NN, [N|Nx]) ->
-    add_neurons(add_neuron(NN,N), Nx);
-add_neurons(NN, []) ->
-    NN.
-
-%%-------------------------------------------------------------------
 %% @doc Deletes a neuron from the network.  
 %% @end
 %%-------------------------------------------------------------------
--spec del_neuron(NN0, N) -> NN when
-      NN0 :: network(),
-      NN  :: network(),
-      N   :: neuron:id().
-del_neuron(NN0, N) ->
-    NN = del_links(NN0, links(NN0,N)),
-    NN#network{nodes = maps:remove(N, NN#network.nodes)}.
-
-%%-------------------------------------------------------------------
-%% @doc Deletes a list of neurons from the network.  
-%% @end
-%%-------------------------------------------------------------------
--spec del_neurons(NN0, Ns) -> NN when
-      NN0 :: network(),
-      NN  :: network(),
-      Ns  :: [neuron:id()].
-del_neurons(NN, [N|Nx]) ->
-    del_neurons(del_neuron(NN,N), Nx);
-del_neurons(NN, []) -> 
-    NN.
+-spec del_neuron(N, NN1) -> NN2 when
+    N   :: neuron:id(),
+    NN1 :: network(),
+    NN2 :: network().
+del_neuron(N, NN1) ->
+    NN2 = lists:foldl(fun del_link/2, NN1, links(N, NN1)),
+    NN2#network{nodes = maps:remove(N, NN2#network.nodes)}.
 
 %%-------------------------------------------------------------------
 %% @doc Returns the node connections.  
 %% @end
 %%-------------------------------------------------------------------
--spec connections(NN, N) -> connections() when
+-spec connections(N, NN) -> connections() when
       NN :: network(),
       N  :: d_node().
-connections(NN, N) ->
-    map_nodes(N, maps:get(N, NN#network.nodes)).
+connections(N, NN) ->
+    CN = map_get(N, NN#network.nodes),
+    #{
+        in  => ?IN(CN), 
+        out => ?OUT(CN)
+    }.
 
 %%-------------------------------------------------------------------
 %% @doc Returns the number of neurons of the network.  
@@ -256,7 +240,7 @@ bias_neurons(NN) ->
       NN :: network(),
       Neurons :: [neuron:id()].
 in_nodes(NN) ->
-    out_nodes(NN, 'start').
+    NN#network.inputs.
 
 %%-------------------------------------------------------------------
 %% @doc Returns the in-degree of the network.  
@@ -265,30 +249,28 @@ in_nodes(NN) ->
 -spec in_degree(NN) -> non_neg_integer() when
       NN :: network().
 in_degree(NN) ->
-    out_degree(NN, 'start').
+    out_degree('start', NN).
 
 %%-------------------------------------------------------------------
 %% @doc Returns all nodes emanating from N of network NN. 
 %% @end
 %%-------------------------------------------------------------------
--spec in_nodes(NN, N) -> Nodes when
-      NN :: network(),
+-spec in_nodes(N, NN) -> Nodes when
       N  :: d_node(),
+      NN :: network(),
       Nodes :: [d_node()].
-in_nodes(NN, N) -> 
-    Conn = maps:get(N, NN#network.nodes),
-    maps:keys(Conn#cn.in).
+in_nodes(N, NN) -> 
+    maps:keys(?IN(maps:get(N, NN#network.nodes))).
 
 %%-------------------------------------------------------------------
 %% @doc Returns the in-degree of the network node.  
 %% @end
 %%-------------------------------------------------------------------
--spec in_degree(NN, N) -> non_neg_integer() when
-      NN :: network(),
-      N  :: d_node().
-in_degree(NN, N) ->
-    Conn = maps:get(N, NN#network.nodes),
-    maps:size(Conn#cn.in).
+-spec in_degree(N, NN) -> non_neg_integer() when
+      N  :: d_node(),
+      NN :: network().
+in_degree(N, NN) ->
+    maps:size(?IN(maps:get(N, NN#network.nodes))).
 
 %%-------------------------------------------------------------------
 %% @doc Returns the neurons connected to end. 
@@ -298,7 +280,7 @@ in_degree(NN, N) ->
       NN :: network(),
       Neurons :: [neuron:id()].
 out_nodes(NN) ->
-    in_nodes(NN, 'end').
+    NN#network.outputs.
 
 %%-------------------------------------------------------------------
 %% @doc Returns the out-degree of the network.  
@@ -307,30 +289,28 @@ out_nodes(NN) ->
 -spec out_degree(NN) -> non_neg_integer() when
       NN :: network().
 out_degree(NN) ->
-    in_degree(NN, 'end').
+    in_degree('end', NN).
 
 %%-------------------------------------------------------------------
 %% @doc Returns all nodes incident in N of network NN. 
 %% @end
 %%-------------------------------------------------------------------
--spec out_nodes(NN, N) -> Nodes when
-      NN :: network(),
+-spec out_nodes(N, NN) -> Nodes when
       N  :: d_node(),
+      NN :: network(),
       Nodes :: [d_node()].
-out_nodes(NN, N) -> 
-    Conn = maps:get(N, NN#network.nodes),
-    maps:keys(Conn#cn.out).
+out_nodes(N, NN) -> 
+    maps:keys(?OUT(maps:get(N, NN#network.nodes))).
 
 %%-------------------------------------------------------------------
 %% @doc Returns the out-degree of the network node.  
 %% @end
 %%-------------------------------------------------------------------
--spec out_degree(NN, N) -> non_neg_integer() when
-      NN :: network(),
-      N  :: d_node().
-out_degree(NN, N) ->
-    Conn = maps:get(N, NN#network.nodes),
-    maps:size(Conn#cn.out).
+-spec out_degree(N, NN) -> non_neg_integer() when
+      N  :: d_node(),
+      NN :: network().
+out_degree(N, NN) ->
+    maps:size(?OUT(maps:get(N, NN#network.nodes))).
 
 %%-------------------------------------------------------------------
 %% @doc Creates (or modifies) a link between N1 and N2. Atoms 'start'
@@ -338,97 +318,71 @@ out_degree(NN, N) ->
 %% or/and end.
 %% @end
 %%------------------------------------------------------------------
--spec add_link(NN0, Link) -> NN1 when
-      NN0  :: network(),
-      Link :: link:link(),
-      NN1  :: network().
-add_link(NN, {N1, N2}) ->
-    is_allowed(NN, N1, N2),
+-spec add_link(Link, NN1) -> NN2 when
+    Link :: link:link(),
+    NN1 :: network(),
+    NN2 :: network().
+add_link({start, N2}, NN) ->
+    InMap = ?OUT(map_get(start, NN#network.nodes)),
+    false = is_map_key(N2, InMap),
+    insert_link(NN#network{inputs=[N2|in_nodes(NN)]},start,N2);
+add_link({N1, 'end'}, NN) ->
+    OutMap = ?IN(map_get('end', NN#network.nodes)),
+    false  = is_map_key(N1, OutMap),
+    insert_link(NN#network{outputs=[N1|out_nodes(NN)]},N1,'end');
+add_link({N1, N2}, NN) ->
     insert_link(NN, N1, N2).
 
-is_allowed(#network{type= recurrent} =  _,  _,  _) -> true;
-is_allowed(#network{type=sequential} = NN, N1, N2) -> 
-    case find_path(NN, N2, N1) of
-        not_found -> true;
-        Path      -> error({bad_link, Path})
-    end.
-
 %%-------------------------------------------------------------------
-%% @doc Creates (or modifies) a link between N1 and N2. 
+%% @doc Deletes the link between N1 and N2. 
 %% @end
-%%------------------------------------------------------------------
--spec add_links(NN0, Links) -> NN1 when
-      NN0   :: network(),
-      Links :: [link:link()],
-      NN1   :: network().
-add_links(NN, [L|Lx]) -> add_links(add_link(NN, L), Lx);
-add_links(NN,     []) -> NN.
+%%-------------------------------------------------------------------
+-spec del_link(Link, NN1) -> NN2 when
+    Link :: link:link(),
+    NN1 :: network(),
+    NN2 :: network().
+del_link({start,   N2 }, NN) -> 
+    remove_link(NN#network{ inputs=lists:delete(N2, in_nodes(NN))},start,N2);
+del_link({   N1, 'end'}, NN) -> 
+    remove_link(NN#network{outputs=lists:delete(N1,out_nodes(NN))},N1,'end');
+del_link({   N1,   N2 }, NN) -> 
+    remove_link(NN, N1, N2).
 
 %%-------------------------------------------------------------------
 %% @doc Deletes the link between N1 and N2. 
 %% @end
 %%-------------------------------------------------------------------
--spec del_link(NN0, Links) -> NN1 when
-      NN0   :: network(),
-      Links :: [link:link()],
-      NN1   :: network().
-del_link(NN_0, {N1, N2}) -> 
-    NN_1 = remove_link(NN_0, N1, N2),
-    case find_path(NN_1, start, N2) of
-        not_found -> error({nnet_broken, no_path, #{start=>N2}});
-        _Path     -> 
-            case find_path(NN_1, N1, 'end') of
-                not_found -> error({nnet_broken, no_path, #{N1=>'end'}});
-                _Path     -> NN_1
-            end
-    end.
-
-%%-------------------------------------------------------------------
-%% @doc Deletes the links using lists of neurons. 
-%% @end
-%%-------------------------------------------------------------------
--spec del_links(NN0, Links) -> NN1 when
-      NN0   :: network(),
-      Links :: [link:link()],
-      NN1   :: network().
-del_links(NN, [L|Lx]) -> del_links(del_link(NN, L), Lx);
-del_links(NN,     []) -> NN.
-
-%%-------------------------------------------------------------------
-%% @doc Deletes the link between N1 and N2. 
-%% @end
-%%-------------------------------------------------------------------
--spec move_link(NN0, Link, NMap) -> NN1 when
-      NN0   :: network(),
+-spec move_link(Link, NN1, NMap) -> NN2 when
       Link  :: link:link(),
+      NN1   :: network(),
       NMap  :: #{d_node() => d_node()},
-      NN1   :: network().
-move_link(NN, {N1, N2}, NMap) -> 
+      NN2   :: network().
+move_link({N1, N2}, NN, NMap) -> 
     N3 = maps:get(N1, NMap, N1),
     N4 = maps:get(N2, NMap, N2),
-    add_link(del_link(NN, {N1,N2}), {N3, N4}).
+    add_link({N3,N4}, del_link({N1,N2}, NN)).
 
 %%-------------------------------------------------------------------
-%% @doc Deletes the links using lists of neurons. 
+%% @doc Searches for a path between N1 and N2. 
 %% @end
 %%-------------------------------------------------------------------
--spec move_links(NN0, Links, NMap) -> NN1 when
-      NN0   :: network(),
-      Links :: [link:link()],
-      NMap  :: #{d_node() => d_node()},
-      NN1   :: network().
-move_links(NN, [L|Lx],  NMap) -> 
-    move_links(move_link(NN, L, NMap), Lx, NMap);
-move_links(NN,     [], _NMap) -> 
-    NN.
+-spec path({From, To}, NN) -> Path when
+      From :: d_node(),
+      To   :: d_node(),
+      NN   :: network(),
+      Path :: [d_node()] | not_found.
+path({ N, N},  _) -> [N];
+path({N1,N2}, NN) ->
+    Nexts = out_nodes(N1, NN),
+    one_path(Nexts, N2, [], [N1], [N1], NN).
 
 %%-------------------------------------------------------------------
 %% @doc Returns all links emanating from the start of the network. 
 %% @end
 %%-------------------------------------------------------------------
 -spec in_links(NN) -> Links when
-      NN :: network(),
-      Links :: [link:link()].
+    NN :: network(),
+    Links :: [link:link()].
 in_links(NN) ->
     out_links(NN, 'start').
 
@@ -436,63 +390,63 @@ in_links(NN) ->
 %% @doc Returns all links incident on N of network NN. 
 %% @end
 %%-------------------------------------------------------------------
--spec in_links(NN, N) -> Links when
-      NN :: network(),
-      N  :: d_node(),
-      Links :: [link:link()].
-in_links(NN, N2) ->
-    ConnN2 = maps:get(N2, NN#network.nodes),
-    [{N1,N2} || {N1,link} <- maps:to_list(ConnN2#cn.in)].
+-spec in_links(N, NN) -> Links when
+    N :: d_node(),
+    NN :: network(),
+    Links :: [link:link()].
+in_links(N2, NN) ->
+    In = ?IN(maps:get(N2, NN#network.nodes)),
+    [{N1,N2} || {N1,link} <- maps:to_list(In)].
 
 %%-------------------------------------------------------------------
 %% @doc Returns all links incident on the end of the network.  
 %% @end
 %%-------------------------------------------------------------------
 -spec out_links(NN) -> Links when
-      NN :: network(),
-      Links :: [link:link()].
+    NN :: network(),
+    Links :: [link:link()].
 out_links(NN) ->
-    in_links(NN, 'end').
+    in_links('end', NN).
 
 %%-------------------------------------------------------------------
 %% @doc Returns all links emanating from N of network NN. 
 %% @end
 %%-------------------------------------------------------------------
--spec out_links(NN, N) -> Links when
-      NN :: network(),
-      N  :: d_node(),
-      Links :: [link:link()].
-out_links(NN, N1) ->
-    ConnN1 = maps:get(N1, NN#network.nodes),
-    [{N1,N2} || {N2,link} <- maps:to_list(ConnN1#cn.out)].
+-spec out_links(N, NN) -> Links when
+    N :: d_node(),
+    NN :: network(),
+    Links :: [link:link()].
+out_links(N1, NN) ->
+    Out = ?OUT(maps:get(N1, NN#network.nodes)),
+    [{N1,N2} || {N2,link} <- maps:to_list(Out)].
 
 %%-------------------------------------------------------------------
 %% @doc Returs all network links. 
 %% @end
 %%-------------------------------------------------------------------
 -spec links(NN) -> Links when
-      NN :: network(),
-      Links :: [link:link()].
+    NN :: network(),
+    Links :: [link:link()].
 links(#network{nodes=Nodes} = NN) ->
-    lists:append([out_links(NN,N) || N <- maps:keys(Nodes)]).
+    lists:append([out_links(N,NN) || N <- maps:keys(Nodes)]).
 
 %%-------------------------------------------------------------------
 %% @doc Returs all node links. 
 %% @end
 %%-------------------------------------------------------------------
--spec links(NN, N) -> Links when
-      NN :: network(),
-      N  :: d_node(),
-      Links :: [link:link()].
-links(NN, N) ->
-    lists:append(in_links(NN,N), out_links(NN, N)).
+-spec links(N, NN) -> Links when
+    N :: d_node(),
+    NN :: network(),
+    Links :: [link:link()].
+links(N, NN) ->
+    lists:append(in_links(N,NN), out_links(N,NN)).
 
 %%-------------------------------------------------------------------
 %% @doc Returs the number of links in the network. 
 %% @end
 %%-------------------------------------------------------------------
 -spec no_links(NN) -> non_neg_integer() when
-      NN :: network().
+    NN :: network().
 no_links(NN) ->
     length(links(NN)).
 
@@ -500,24 +454,18 @@ no_links(NN) ->
 %% @doc Returs the number of links in the node. 
 %% @end
 %%-------------------------------------------------------------------
--spec no_links(NN, N) -> non_neg_integer() when
-      NN :: network(),
-      N  :: d_node().
-no_links(NN, N) ->
-    length(links(NN, N)).
+-spec no_links(N, NN) -> non_neg_integer() when
+    N  :: d_node(),
+    NN :: network().
+no_links(N, NN) ->
+    length(links(N, NN)).
 
 
 %%====================================================================
 %% Internal functions
 %%====================================================================
 
-% Finds a path from N1 to N2 ----------------------------------------
-find_path( _,  N,  N) -> 
-    [N];
-find_path(NN, N1, N2) ->
-    Nexts = out_nodes(NN,N1),
-    one_path(Nexts, N2, [], [N1], [N1], NN).
-
+% Finds the first path from N1 to N2 --------------------------------
 one_path([W| _], W,    _,  _, Ps,  _) -> % The path is found
     lists:reverse([W|Ps]); 
 one_path([N|Ns], W, Cont, Xs, Ps, NN) -> 
@@ -525,7 +473,7 @@ one_path([N|Ns], W, Cont, Xs, Ps, NN) ->
         true  -> % That neuron were evluated before
             one_path(Ns, W, Cont, Xs, Ps, NN);
         false -> % That neuron out neighbours can be check firts
-            Nexts = out_nodes(NN,N),
+            Nexts = out_nodes(N,NN),
             one_path(Nexts, W, [{Ns,Ps}|Cont], [N|Xs], [N|Ps], NN)
     end;
 one_path([], W, [{Ns,Ps}|Cont], Xs, _, NN) -> % End of neighbours
@@ -570,8 +518,4 @@ remove_out(#cn{out=Out} = ConnN1, N2) ->
 
 remove_in(#cn{in=In} = ConnN2, N1) -> 
     ConnN2#cn{in = maps:remove(N1, In)}.
-
-% Converts a cn record into a connection ----------------------------
-map_nodes(_Key, #cn{in=In,out=Out}) ->
-    #{in=>In,out=>Out}.
 

@@ -1,5 +1,6 @@
 %%%-------------------------------------------------------------------
 %% @doc nnet public API
+%% TODO: Optimise accross nodes: Eval usage of {local_content, true}  
 %% @end
 %%%-------------------------------------------------------------------
 -module(nnet_app).
@@ -16,7 +17,8 @@
 %%--------------------------------------------------------------------
 start(_StartType, _StartArgs) ->
     true = new_table(network, network:record_fields()),
-    true = new_table(   link,    link:record_fields()),
+    true = new_table(   link,     [  from_to, weight]),
+    true = new_table( neuron,     [reference,   data]),
     nnet_sup:start_link().
 
 %%--------------------------------------------------------------------

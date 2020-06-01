@@ -116,12 +116,12 @@ groups() ->
         },
         {in_sequence_connections_edits, [sequence, shuffle],
          [
-             correct_connect_allowed,
             %  correct_connect_all,
-             correct_disconnect_allowed,
+             correct_connect_allowed,
              correct_disconnect_all,
-            %  correct_move_allowed,
+             correct_disconnect_allowed,
             %  correct_move_all,
+            %  correct_move_allowed,
              correct_delete_of_weights
          ]
         },
@@ -135,12 +135,12 @@ groups() ->
         {in_parallel_edits, [parallel, shuffle],
          [correct_bias_reinitialisation     || _ <- lists:seq(1,5)] ++ 
          [correct_switch_activation         || _ <- lists:seq(1,5)] ++
+         %  [correct_connect_all               || _ <- lists:seq(1,5)] ++        
          [correct_connect_allowed           || _ <- lists:seq(1,5)] ++
-        %  [correct_connect_all               || _ <- lists:seq(1,5)] ++
-         [correct_disconnect_allowed        || _ <- lists:seq(1,5)] ++
          [correct_disconnect_all            || _ <- lists:seq(1,5)] ++
-        %  [correct_move_allowed              || _ <- lists:seq(1,5)] ++
+         [correct_disconnect_allowed        || _ <- lists:seq(1,5)] ++
         %  [correct_move_all                  || _ <- lists:seq(1,5)] ++
+        %  [correct_move_allowed              || _ <- lists:seq(1,5)] ++
          [correct_delete_of_weights         || _ <- lists:seq(1,5)] ++
          [correct_neuron_copy               || _ <- lists:seq(1,5)] ++
          [correct_neuron_clone              || _ <- lists:seq(1,5)] ++
@@ -230,6 +230,20 @@ correct_connect_allowed(Config) ->
             NNET_1
         end,
     {atomic, Result} = nnet:edit(?config(network_id, Config), Test),
+    ?END(Result).
+
+% -------------------------------------------------------------------
+correct_disconnect_all(Config) -> 
+    ?HEAD("Correct disconnection of allowed without error ........"),
+    Test = 
+        fun(NNET_0) -> 
+            Links = [{F,T} || F<-random_neurons(NNET_0), T<-random_neurons(NNET_0)],
+            ?INFO("Disconnecting all: ", Links),
+            NNET_1 = nnet:disconnect_all(Links, NNET_0),
+            [ok = network_SUITE:is_not_in_network(X, NNET_1) || X <- Links],
+            NNET_1
+        end,
+    {atomic, Result} = nnet:edit(?config(network_id, Config), Test),
     ?END(Result). 
 
 % -------------------------------------------------------------------
@@ -246,33 +260,7 @@ correct_disconnect_allowed(Config) ->
             NNET_1
         end,
     {atomic, Result} = nnet:edit(?config(network_id, Config), Test),
-    ?END(Result). 
-
-% -------------------------------------------------------------------
-correct_disconnect_all(Config) -> 
-    ?HEAD("Disconnection of not allowed raises error ............."),
-    Test1 = 
-        fun(NNET_0) -> 
-            Links = [{F,T} || F<-random_neurons(NNET_0), T<-random_neurons(NNET_0)],
-            NNET_1 = nnet:disconnect_allowed(Links, NNET_0),
-            NotAllowedLinks = intersection(Links, NNET_1),
-            [ok = returns_disconnection_error([L], NNET_1) || L <- NotAllowedLinks],
-            NNET_0
-        end,
-    {atomic, Result1} = nnet:edit(?config(network_id, Config), Test1),
-    ?HEAD("Correct disconnection of allowed without error ........"),
-    Test2 = 
-        fun(NNET_0) -> 
-            Links = [{F,T} || F<-random_neurons(NNET_0), T<-random_neurons(NNET_0)],
-            NNET_1 = nnet:disconnect_allowed(Links, NNET_0),
-            AllowedLinks = network:links(NNET_0) -- network:links(NNET_1),
-            ?INFO("Disconnecting allowed links of: ", Links),
-            NNET_2 = nnet:disconnect_allowed(AllowedLinks, NNET_0),
-            ok = have_the_same_links(NNET_1, NNET_2),
-            NNET_2
-        end,
-    {atomic, Result2} = nnet:edit(?config(network_id, Config), Test2),
-    ?END({Result1, Result2}). 
+    ?END(Result).
 
 % -------------------------------------------------------------------
 correct_delete_of_weights(Config) ->
@@ -355,22 +343,6 @@ correct_neuron_double(Config) ->
     ?END(Result).
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 % --------------------------------------------------------------------
 % INDIVIDUAL TEST FUNCTIONS ------------------------------------------
 
@@ -419,16 +391,6 @@ is_not_erasable({From,To}, NNET_0) ->
     true = (not_found==PathStartToTo) or (not_found==PathFromToEnd),
     ?END(ok). 
 
-% Checks the disconnection returns an error -------------------------
-returns_disconnection_error(Links, NNET) -> 
-    ?HEAD("Does the disconnection raises an error?"),
-    try nnet:disconnect_all(Links, NNET) of 
-        _ -> error("disconnection did not raise error")
-    catch error:{no_path, Path} -> 
-        ?INFO("Error reason: ", {no_path, Path}),
-        ?END(ok)
-    end.
-
 % Checks the links of both networks are the same --------------------
 have_the_same_links(NNET_1, NNET_2) -> 
     ?HEAD("Does this 2 networks have the same links?"),
@@ -468,82 +430,6 @@ has_network_increased(Expected, NNET_1, NNET_0) ->
     ?END(ok).
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-% % Divides the neuron and checks -------------------------------------
-% test_divide_neuron(NNET_0, N1_id) -> 
-%     ?HEAD("divide_neuron"),
-%     NNET_1 = nnet:divide_neuron(NNET_0, N1_id),
-%     [N2_id] = network:neurons(NNET_1) -- network:neurons(NNET_0),
-%     [N1] = mnesia:read(neuron, N1_id),
-%     [N2] = mnesia:read(neuron, N2_id),
-%     ?INFO("{Neuron1, Neuron2}: ", {N1,N2}),
-%     true = neuron:activation(N1)  == neuron:activation(N2),
-%     true = neuron:aggregation(N1) == neuron:aggregation(N2),
-%     true = neuron:initializer(N1) == neuron:initializer(N2),
-%     true = neuron:bias(N1)        == neuron:bias(N2),
-%     LN1 = network:links(N1, NNET_1_id),
-%     LN2 = network:links(N2, NNET_1_id),
-%     LAll = network:links(NNET_0, N1_id),
-%     ?INFO("{Links, {LinksN1, LinksN2}}: ", {LAll, {LN1,LN2}}),
-%     [_|_] = LAll -- (LN1 ++ LN2),
-%     {ok, NNET_1}.
-
-% % Merges two neurons and checks -------------------------------------
-% test_merge_neurons(NNET_0, N1_id, N2_id) -> 
-%     ?HEAD("merge_neurons"),
-%     % What to do if the 2 neurons had an input???
-%     {ok, NNET_1}.
-
-
-
-
-% Connects some neuron and checks -----------------------------------
-test_connect_allowed(NNET_0, From, To) -> 
-    ?HEAD("connect_allowed"),
-    ?INFO("{From,To}: ", {From,To}),
-    NNET_1 = nnet:connect_allowed(NNET_0, From, To),
-    LAll = [{F,T} || F <- From, T <- To], ?INFO("All: ", LAll),
-    LNew = network:links(NNET_1) -- network:links(NNET_0), ?INFO("New: ", LNew),
-    Ignored = LAll -- (LAll -- network:links(NNET_0)), ?INFO("Ignored: ", Ignored),
-    NotAllowed = get_not_allowed(NNET_0, LAll), ?INFO("Not allowed: ", NotAllowed),
-    Null = LAll -- (NotAllowed ++ Ignored ++ LNew),
-    ?INFO("[] = LAll -- (NotAllowed ++ Ignored ++ LNew)): ", Null),
-    [] = Null,
-    {ok, NNET_1}. 
-
-get_not_allowed([L|Lx], NNET_0) -> 
-    try network:add_link(NNET_0, L) of
-         NNET_1                ->    get_not_allowed(Lx, NNET_1)
-    catch error:{bad_link, _} -> [L|get_not_allowed(Lx, NNET_0)]
-    end;
-get_not_allowed([], _NNET) -> [].
-
-% Disconnects some neuron and checks --------------------------------
-test_disconnect_all(NNET_0, From, To) -> 
-    ?HEAD("disconnect_all"),
-    ?INFO("{From,To}: ", {From,To}),
-    NNET_1 = nnet:disconnect_all(NNET_0, From, To),
-    LAll = [{F,T} || F <- From, T <- To], ?INFO("All: ", LAll),
-    LNNET_1 = network:links(NNET_1),
-    Null   = LNNET_1 -- (LNNET_1 -- LAll),
-    ?INFO("[] = LNNET_1 -- (LNNET_1 -- LAll): ", Null),
-    [] = Null,
-    {ok, NNET_1}. 
-
-
 % --------------------------------------------------------------------
 % SPECIFIC HELPER FUNCTIONS ------------------------------------------
 
@@ -567,10 +453,6 @@ intersection(Links, NNET) ->
             sets:from_list(Links), 
             sets:from_list(network:links(NNET))
     )).
-
-
-
-
 
 
 % --------------------------------------------------------------------

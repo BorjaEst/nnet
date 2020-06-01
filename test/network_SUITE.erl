@@ -18,6 +18,20 @@
 -define(INFO(A,B),    ct:log(?LOW_IMPORTANCE,    "~p: ~p",   [A,B])).
 -define(ERROR(Error), ct:pal( ?HI_IMPORTANCE, "Error: ~p", [Error])).
 
+-define(SEQ_NETWORK_MAP, #{start => [a1, b1],
+                           a1    => [a2, b2],
+                           b1    => [a2, b2],
+                           a2    => ['end'],
+                           b2    => ['end'],
+                           'end' => []}).
+-define(RCC_NETWORK_MAP, #{start => [x1, y1],
+                           x1    => [x2],
+                           y1    => [y2],
+                           x2    => ['end', y1],
+                           y2    => ['end', x1],
+                           'end' => []}).
+
+
 
 %%--------------------------------------------------------------------
 %% Function: suite() -> Info
@@ -105,13 +119,17 @@ groups() ->
 %%--------------------------------------------------------------------
 all() ->
     [
-        test_add_nodes,
+        test_from_to_map,
+        test_no_links,
+        test_get_links,
         test_add_links,
-        test_move_links,
-        test_connections,
-        test_start_node,
-        test_end_node,
-        test_delete_node
+        test_del_links,
+        test_no_neurons,
+        test_get_neurons,
+        test_add_nodes,
+        test_del_nodes,
+        test_concat_networks
+
     ].
 
 %%--------------------------------------------------------------------
@@ -136,124 +154,198 @@ my_test_case_example(_Config) ->
 % TESTS --------------------------------------------------------------
 
 % -------------------------------------------------------------------
-test_add_nodes() ->
-    [].
-test_add_nodes(_Config) ->
-    ?HEAD("Correct addition of nodes in a network ................"),
-    NN0 = network:new(sequential),
-    NN1 = network:add_neurons(NN0, [n1,n2,n3]),
-    ?END({ok, NN1}).
+test_from_to_map(_Config) -> 
+    ?HEAD("Correct serialization/deserialisation of network/map .."),
+    ok = correct_deserialization(?SEQ_NETWORK_MAP),
+    ok = correct_deserialization(?RCC_NETWORK_MAP),
+    ok = correct_serialization(seq_network()),
+    ok = correct_serialization(rcc_network()),
+    ?END(ok).
 
 % -------------------------------------------------------------------
-test_add_links() ->
-    [].
-test_add_links(_Config) -> 
+test_no_links(_Config) -> 
+    ?HEAD("Correct return of the connections size ................"),
+    NN0 = seq_network(),
+    Expected_Size = lists:sum(
+        [length(Cn) || Cn <- maps:values(?SEQ_NETWORK_MAP)]
+    ),
+    ok = are_connections_size(Expected_Size, NN0),
+    ?END(ok).
+
+% -------------------------------------------------------------------
+test_get_links(_Config) -> 
+    ?HEAD("Correct collection of the network links ..............."),
+    NN0 = seq_network(),
+    Expected_Links = 
+        [{F,T} || {F,Cn} <- maps:to_list(?SEQ_NETWORK_MAP), T <- Cn],
+    ok = are_network_links(Expected_Links, NN0),
+    ?END(ok).
+
+% -------------------------------------------------------------------
+test_add_links(_Config) ->
     ?HEAD("Correct addition of links in a network ................"),
-    % SeqLinks = [{A,B} || A <- [n1],    B <- [n2]          ],
-    % RecLinks = [{A,B} || A <- [n1,n2], B <- [n1,n2], A=/=B],
-    SeqL = {n1,n2},
-    RccL = {n1,n1},
-    [SeqL] = network:links(
-               network:add_link(seq_network([n1,n2]), SeqL)),
-    [SeqL] = network:links( 
-               network:add_link(rcc_network([n1,n2]), SeqL)),
-    {'EXIT',{{bad_link,[n1]}, _}} = 
-        (catch network:add_link(seq_network([n1,n2]), RccL)),
-    [RccL] = network:links(
-               network:add_link(rcc_network([n1,n2]), RccL)),
+    NN0 = seq_network(),
+    Link = {a1,'end'},
+    ok = is_not_in_network(Link, NN0),
+    NN1 = network:add_link(Link, NN0),
+    ?INFO("Link added to network: ", Link),
+    ok = is_in_network(Link, NN1),
     ?END(ok).
 
 % -------------------------------------------------------------------
-test_move_links() ->
-    [].
-test_move_links(_Config) -> 
-    ?HEAD("Correct move of links in a network ...................."),
-    Link = {n1,n2},
-    % Sequential tests
-    SeqNet = network:add_link(seq_network([n1,n2,n3]), Link),
-    [{n1,n3}] = network:links(
-        network:move_link(SeqNet, Link, #{n2=>n3})),
-    [{n3,n2}] = network:links(
-        network:move_link(SeqNet, Link, #{n1=>n3})),
-    [{n2,n1}] = network:links( 
-        network:move_link(SeqNet, Link, #{n1=>n2,n2=>n1})), 
-    {'EXIT',{{bad_link,[n1]}, _}} = 
-        (catch network:move_link(SeqNet, Link, #{n2=>n1})), 
-    {'EXIT',{{bad_link,[n2]}, _}} = 
-        (catch network:move_link(SeqNet, Link, #{n1=>n2})), 
-    {'EXIT',{{bad_link,[n3]}, _}} = 
-        (catch network:move_link(SeqNet, Link, #{n1=>n3,n2=>n3})), 
-    % Recurrent tests
-    RccNet = network:add_link(rcc_network([n1,n2,n3]), Link),
-    [{n1,n3}] = network:links(
-        network:move_link(RccNet, Link, #{n2=>n3})),
-    [{n3,n2}] = network:links(
-        network:move_link(RccNet, Link, #{n1=>n3})),
-    [{n1,n1}] = network:links(
-        network:move_link(RccNet, Link, #{n2=>n1})),
-    [{n2,n2}] = network:links(
-        network:move_link(RccNet, Link, #{n1=>n2})),
-    [{n2,n1}] = network:links(
-        network:move_link(RccNet, Link, #{n1=>n2,n2=>n1})),
-    [{n3,n3}] = network:links(
-        network:move_link(RccNet, Link, #{n1=>n3,n2=>n3})), 
+test_del_links(_Config) ->
+    ?HEAD("Correct delete of links in a network .................."),
+    NN0 = seq_network(),
+    Link = ltools:randnth(network:links(NN0)),
+    ok = is_in_network(Link, NN0),
+    NN1 = network:del_link(Link, NN0),
+    ?INFO("Link removed from network: ", Link),
+    ok = is_not_in_network(Link, NN1),
     ?END(ok).
 
 % -------------------------------------------------------------------
-test_connections() ->
-    [].
-test_connections(_Config) ->
-    ?HEAD("Connections can correctly be retrieved ................"),
-    NN0 = rcc_network([n1,n2]),
-    0   = network:in_degree(NN0), 
-    NN1 = network:add_links(NN0, 
-            [{A,B} || A <- [start,n1,n2], B <- [n1,n2,'end']]),
-    #{
-        in :=#{start:=link, n1:=link, n2:=link}, 
-        out:=#{'end':=link, n1:=link, n2:=link}
-    } = network:connections(NN1, n1),
+test_no_neurons(_Config) -> 
+    ?HEAD("Correct return of the network size ...................."),
+    NN0 = seq_network(),
+    Expected_Size = maps:size(?SEQ_NETWORK_MAP) - 2,
+    ok = is_network_size(Expected_Size, NN0),
     ?END(ok).
 
 % -------------------------------------------------------------------
-test_start_node() ->
-    [].
-test_start_node(_Config) ->
-    ?HEAD("Correct behaviour of start node in network ............"),
-    NN0 = seq_network([n1,n2]),
-    0   = network:in_degree(NN0), 
-    NN1 = network:add_links(NN0, 
-            [{A,B} || A <- [start], B <- [n1,n2]]),
-    []  = network:bias_neurons(NN1),
-    2   = network:in_degree(NN1),
+test_get_neurons(_Config) -> 
+    ?HEAD("Correct collection of the network neurons ............."),
+    NN0 = seq_network(),
+    Expected_Neurons = maps:keys(?SEQ_NETWORK_MAP) -- [start,'end'],
+    ok = are_network_neurons(Expected_Neurons, NN0),
     ?END(ok).
 
 % -------------------------------------------------------------------
-test_end_node() ->
-    [].
-test_end_node(_Config) -> 
-    ?HEAD("Correct behaviour of end node in network .............."),
-    NN0 = seq_network([n1,n2]),
-    0   = network:out_degree(NN0),
-    NN1 = network:add_links(NN0, 
-            [{A,B} || A <- [n1,n2], B <- ['end']]),
-    []  = network:sink_neurons(NN1),
-    2   = network:out_degree(NN1),
+test_add_nodes(_Config) ->
+    ?HEAD("Correct addition of neurons in a network .............."),
+    NN0 = seq_network(),
+    Node = n1,
+    ok = is_not_in_network(Node, NN0),
+    NN1 = network:add_neuron(Node, NN0),
+    ?INFO("Node added to network: ", Node),
+    ok = is_in_network(Node, NN1),
     ?END(ok).
 
 % -------------------------------------------------------------------
-test_delete_node() ->
-    [].
-test_delete_node(_Config) -> 
-    ?HEAD("Correct delete of a network node ......................"),
-    NN0 = seq_network([n1,n2]),
-    NN1 = network:add_links(NN0, [{start,X} || X<-[n1,n2]] ++ 
-                                 [{X,'end'} || X<-[n1,n2]] ++
-                                 [{n1,n2}]),
-    NN2 = network:del_neurons(NN1, [n2]),
-    [n1] = network:in_nodes(NN2), 
-    [n1] = network:out_nodes(NN2),
-    {_,'end'} = hd(network:out_links(NN2, n1)),
-    {start,_} = hd( network:in_links(NN2, n1)),
+test_del_nodes(_Config) ->
+    ?HEAD("Correct delete of neurons in a network ................"),
+    NN0 = seq_network(),
+    Node  = ltools:randnth(network:neurons(NN0)),
+    Links = network:links(Node, NN0), 
+    [ok = is_in_network(X, NN0) || X <- [Node|Links]],
+    NN1 = network:del_neuron(Node, NN0),
+    ?INFO("Node removed from network: ", Node),
+    [ok = is_not_in_network(X, NN1) || X <- [Node|Links]],
+    ?END(ok).
+
+% -------------------------------------------------------------------
+test_concat_networks(_Config) -> 
+    ?HEAD("Correct concatenation of networks ....................."),
+    NN1 = seq_network(),
+    NN2 = rcc_network(),
+    NN3 = network:concat(NN1, NN2),
+    ?INFO("Networks concatenated: ", NN3),
+    Expected_Neurons = network:neurons(NN1) ++ network:neurons(NN2),
+    ok = are_network_neurons(Expected_Neurons, NN3),
+    L_NN1 = [{F,T} || {F,T} <- network:links(NN1), T =/= 'end'],
+    L_NN2 = [{F,T} || {F,T} <- network:links(NN2), F =/= start],
+    L_New = [{F,T} || F <- network:out_nodes(NN1), T <- network:in_nodes(NN2)],
+    Expected_Links = lists:append([L_NN1, L_NN2, L_New]),
+    ok = are_network_links(Expected_Links, NN3),
+    ?END(ok).
+
+
+% --------------------------------------------------------------------
+% INDIVIDUAL TEST FUNCTIONS ------------------------------------------
+
+% Checks the correct network serialization --------------------------
+correct_serialization(NNET) -> 
+    ?HEAD("Is network correclty serialized?"),
+    ?INFO("Network: ", NNET),
+    Map = network:to_map(NNET),
+    ?INFO("Map: ", Map),
+    Map = network:to_map(network:from_map(Map)), % Id doesn't matches
+    ?END(ok).
+
+% Checks the correct network deserialisation ------------------------
+correct_deserialization(Map) -> 
+    ?HEAD("Is network correclty deserialized?"),
+    ?INFO("Map: ", Map),
+    NNET = network:from_map(Map),
+    ?INFO("Network: ", NNET), 
+    Map = network:to_map(NNET),
+    ?END(ok).
+
+% Checks the size of the connections is the indicated ---------------
+are_connections_size(N, NNET) -> 
+    ?HEAD("Is network connections size correct?"),
+    ?INFO("Expected size: ", N),
+    ?INFO("Amount of network connections: ", network:no_links(NNET)),
+    N = network:no_links(NNET),
+    #{connections:=N} = network:info(NNET),
+    ?END(ok).
+
+% Checks the links in the network are the indicated -----------------
+are_network_links(Links, NNET) -> 
+    ?HEAD("Are network links correct?"),
+    ?INFO("Expected links: ", Links),
+    ?INFO("Network links: ", network:links(NNET)),
+    SortedLinks = lists:sort(Links),
+    SortedLinks = lists:sort(network:links(NNET)),
+    ?END(ok).
+
+% Checks the size of the network is the indicated -------------------
+is_network_size(N, NNET) -> 
+    ?HEAD("Is network size correct?"),
+    ?INFO("Expected size: ", N),
+    ?INFO("Network size: ", network:no_neurons(NNET)),
+    N = network:no_neurons(NNET),
+    #{size:=N} = network:info(NNET),
+    ?END(ok).
+
+% Checks the network neurons are the indicated ----------------------
+are_network_neurons(Neurons, NNET) -> 
+    ?HEAD("Are network neurons correct?"),
+    ?INFO("Expected neurons: ", Neurons),
+    ?INFO("Network neurons: ", network:neurons(NNET)),
+    SortedNeurons = lists:sort(Neurons),
+    SortedNeurons = lists:sort(network:neurons(NNET)),
+    ?END(ok).
+
+% Checks the link is in the network ---------------------------------
+is_in_network({_,_} = Link, NNET) -> 
+    ?HEAD("Is link in network?"),
+    ?INFO("Link: ", Link),
+    ?INFO("Network links: ", network:links(NNET)),
+    [_] = [L || L <- network:links(NNET), L == Link], 
+    ?END(ok);
+
+% Checks the neuron is in the network -------------------------------
+is_in_network(Neuron, NNET) -> 
+    ?HEAD("Is neuron in network?"),
+    ?INFO("Neuron: ", Neuron),
+    ?INFO("Network neurons : ", network:neurons(NNET)),
+    [_] = [N || N <- network:neurons(NNET), N == Neuron], 
+    ?END(ok).
+
+% Checks the link is NOT in the network -----------------------------
+is_not_in_network({_,_} = Link, NNET) -> 
+    ?HEAD("Is not link in network?"),
+    ?INFO("Link: ", Link),
+    ?INFO("Network links: ", network:links(NNET)),
+    [] = [L || L <- network:links(NNET), L == Link], 
+    ?END(ok);
+
+% Checks the neuron is NOT in the network ---------------------------
+is_not_in_network(Neuron, NNET) -> 
+    ?HEAD("Is not neuron in network?"),
+    ?INFO("Neuron: ", Neuron),
+    ?INFO("Network : ", network:neurons(NNET)),
+    [] = [N || N <- network:neurons(NNET), N == Neuron], 
     ?END(ok).
 
 
@@ -261,12 +353,10 @@ test_delete_node(_Config) ->
 % SPECIFIC HELPER FUNCTIONS -----------------------------------------
 
 % Creates a simple sequential network -------------------------------
-seq_network(Nodes) -> 
-    NN = network:new(sequential),
-    network:add_neurons(NN, Nodes).
+seq_network() -> 
+    network:from_map(?SEQ_NETWORK_MAP).
 
 % Creates a simple recurrent network --------------------------------
-rcc_network(Nodes) -> 
-    NN = network:new(recurrent),
-    network:add_neurons(NN, Nodes). 
+rcc_network() -> 
+    network:from_map(?RCC_NETWORK_MAP).
 

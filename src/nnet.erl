@@ -221,6 +221,8 @@ switch_activation(Neurons, NNET, Function_name) ->
 %%-------------------------------------------------------------------
 %% @doc Creates links from all neurons in From to all neurons in To.
 %% If the link existed alreay, it is not modified.
+%% Note it might break the network, to do not break it use 
+%% connect_allowed/2 (Safe but slower).
 %% Should run inside a network edit.
 %% @end
 %%-------------------------------------------------------------------
@@ -234,6 +236,8 @@ connect_all(Links, NNET) ->
 %%-------------------------------------------------------------------
 %% @doc Deletes links from all neurons in From to all neurons in To.
 %% If the link did not existed nothing happens.
+%% Note it might break the network, to do not break it use 
+%% disconnect_allowed/2 (Safe but slower).
 %% Should run inside a network edit.
 %% @end
 %%-------------------------------------------------------------------
@@ -241,18 +245,24 @@ connect_all(Links, NNET) ->
     Links   :: [link()],
     NNET_0  :: network(),
     NNET_1  :: network().
-disconnect_all([{N1,N2}|Lx], NNET_0) -> 
-    NNET_1 = network:del_link({N1,N2}, NNET_0),
-    case path_from_start(N2, NNET_1) of 
-        false -> error({no_path, #{start=>N2}});
-        true  -> 
-    case path_to_end(N1, NNET_1) of
-        false -> error({no_path, #{N1=>'end'}});
-        true  -> 
-    link:delete({N1,N2}),
-    disconnect_all(Lx, NNET_1)
-    end end;
-disconnect_all([], NNET) -> NNET. 
+disconnect_all(Links, NNET) -> 
+    lists:foldl(fun network:del_link/2, NNET, [link:delete(L) || L <- Links]). 
+
+%%-------------------------------------------------------------------
+%% @doc Moves all the links using a map.
+%% Note it might break the network, to do not break it use 
+%% move_allowed/2 (Safe but slower)..
+%% Should run inside a network edit.
+%% @end
+%%-------------------------------------------------------------------
+-spec move_all(Links, NNET_0, #{Old => New}) -> NNET_1 when 
+    Links   :: [link()],
+    NNET_0  :: network(),
+    NNET_1  :: network(),
+    Old     :: neuron:id(),
+    New     :: neuron:id().
+move_all(Links, NNET, NMap) -> 
+    lists:foldl(fun network:move_link/2, NNET, [link:move(L,NMap) || L <- Links]). 
 
 %%-------------------------------------------------------------------
 %% @doc Creates only the allowed links from neurons in From to To.
@@ -291,30 +301,6 @@ disconnect_allowed([{N1,N2}|Lx], NNET_0) ->
     disconnect_allowed(Lx, NNET_1)
     end end;
 disconnect_allowed([], NNET) -> NNET. 
-
-%%-------------------------------------------------------------------
-%% @doc Moves all the links using a map.
-%% Should run inside a network edit.
-%% @end
-%%-------------------------------------------------------------------
--spec move_all(Links, NNET_0, #{Old => New}) -> NNET_1 when 
-    Links   :: [link()],
-    NNET_0  :: network(),
-    NNET_1  :: network(),
-    Old     :: neuron:id(),
-    New     :: neuron:id().
-move_all([{N1,N2}|Lx], NNET_0, NMap) -> 
-    NNET_1 = network:move_link({N1,N2}, NNET_0, NMap),
-    case path_from_start(N2, NNET_1) of 
-        false -> error({no_path, #{start=>N2}});
-        true  -> 
-    case path_to_end(N1, NNET_1) of
-        false -> error({no_path, #{N1=>'end'}});
-        true  -> 
-    link:move({N1,N2}, NMap),    
-    move_all(Lx, NNET_1, NMap)
-    end end;
-move_all([], NNET, _) -> NNET.
 
 %%-------------------------------------------------------------------
 %% @doc Moves only the allowed links using a map.

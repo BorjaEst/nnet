@@ -11,18 +11,20 @@
 
 -export([add_neuron/2, del_neuron/2]).
 -export([in_degree/1, in_nodes/1, out_degree/1, out_nodes/1]).
+-export([in_seq/2, out_seq/2]).
 -export([in_degree/2, in_nodes/2, out_degree/2, out_nodes/2]).
 
--export([add_link/2, del_link/2, move_link/3, path/2]).
+-export([add_link/2, del_link/2, move_link/3, seq_path/2]).
 -export([in_links/1, out_links/1, links/1, no_links/1]).
 -export([in_links/2, out_links/2, links/2, no_links/2]).
 
 -export_type([network/0, connections/0, d_node/0, info/0]).
 
 -type d_node()  :: neuron:id() | 'start' | 'end'.
+-type link()    :: seq | rcc.
 -record(cn, {
-    in  = #{} :: #{d_node() => link},
-    out = #{} :: #{d_node() => link}
+    in  = #{} :: #{d_node() => link()},
+    out = #{} :: #{d_node() => link()}
 }).
 -define( IN(CN), element(#cn.in,  CN)).
 -define(OUT(CN), element(#cn.out, CN)).
@@ -33,8 +35,8 @@
     outputs = [] :: [neuron:id()]  %Keeps the outputs order
 }).
 -type network() :: #network{}.
--type connections() :: #{in  => #{d_node() => link},
-                         out => #{d_node() => link}}.
+-type connections() :: #{in  => #{d_node() => link()},
+                         out => #{d_node() => link()}}.
 -type info() :: #{'size'        => non_neg_integer(),
                   'connections' => non_neg_integer(),
                   'n_inputs'    => non_neg_integer(),
@@ -252,7 +254,7 @@ in_degree(NN) ->
     out_degree('start', NN).
 
 %%-------------------------------------------------------------------
-%% @doc Returns all nodes emanating from N of network NN. 
+%% @doc Returns all nodes connected to N inputs in network NN. 
 %% @end
 %%-------------------------------------------------------------------
 -spec in_nodes(N, NN) -> Nodes when
@@ -261,6 +263,19 @@ in_degree(NN) ->
       Nodes :: [d_node()].
 in_nodes(N, NN) -> 
     maps:keys(?IN(maps:get(N, NN#network.nodes))).
+
+%%-------------------------------------------------------------------
+%% @doc Returns all sequential nodes connected to N inputs in 
+%% network NN.  
+%% @end
+%%-------------------------------------------------------------------
+-spec in_seq(N, NN) -> Nodes when
+      N  :: d_node(),
+      NN :: network(),
+      Nodes :: [d_node()].
+in_seq(N, NN) -> 
+    In = ?IN(maps:get(N, NN#network.nodes)),
+    [X || {X,seq} <- maps:to_list(In)].
 
 %%-------------------------------------------------------------------
 %% @doc Returns the in-degree of the network node.  
@@ -292,7 +307,7 @@ out_degree(NN) ->
     in_degree('end', NN).
 
 %%-------------------------------------------------------------------
-%% @doc Returns all nodes incident in N of network NN. 
+%% @doc Returns all nodes connected from N outputs at network NN. 
 %% @end
 %%-------------------------------------------------------------------
 -spec out_nodes(N, NN) -> Nodes when
@@ -301,6 +316,19 @@ out_degree(NN) ->
       Nodes :: [d_node()].
 out_nodes(N, NN) -> 
     maps:keys(?OUT(maps:get(N, NN#network.nodes))).
+
+%%-------------------------------------------------------------------
+%% @doc Returns all sequential nodes connected from N outputs at 
+%% network NN.  
+%% @end
+%%-------------------------------------------------------------------
+-spec out_seq(N, NN) -> Nodes when
+      N  :: d_node(),
+      NN :: network(),
+      Nodes :: [d_node()].
+out_seq(N, NN) -> 
+    Out = ?OUT(maps:get(N, NN#network.nodes)),
+    [X || {X,seq} <- maps:to_list(Out)].
 
 %%-------------------------------------------------------------------
 %% @doc Returns the out-degree of the network node.  
@@ -325,13 +353,16 @@ out_degree(N, NN) ->
 add_link({start, N2}, NN) ->
     InMap = ?OUT(map_get(start, NN#network.nodes)),
     false = is_map_key(N2, InMap),
-    insert_link(NN#network{inputs=[N2|in_nodes(NN)]},start,N2);
+    insert_link(seq,NN#network{inputs=[N2|in_nodes(NN)]},start,N2);
 add_link({N1, 'end'}, NN) ->
     OutMap = ?IN(map_get('end', NN#network.nodes)),
     false  = is_map_key(N1, OutMap),
-    insert_link(NN#network{outputs=[N1|out_nodes(NN)]},N1,'end');
+    insert_link(seq,NN#network{outputs=[N1|out_nodes(NN)]},N1,'end');
 add_link({N1, N2}, NN) ->
-    insert_link(NN, N1, N2).
+    case seq_path({N2, N1}, NN) of 
+        not_found -> insert_link(seq, NN, N1, N2);
+        _Path     -> insert_link(rcc, NN, N1, N2)
+    end.
 
 %%-------------------------------------------------------------------
 %% @doc Deletes the link between N1 and N2. 
@@ -353,10 +384,10 @@ del_link({   N1,   N2 }, NN) ->
 %% @end
 %%-------------------------------------------------------------------
 -spec move_link(Link, NN1, NMap) -> NN2 when
-      Link  :: link:link(),
-      NN1   :: network(),
-      NMap  :: #{d_node() => d_node()},
-      NN2   :: network().
+    Link  :: link:link(),
+    NN1   :: network(),
+    NMap  :: #{d_node() => d_node()},
+    NN2   :: network().
 move_link({N1, N2}, NN, NMap) -> 
     N3 = maps:get(N1, NMap, N1),
     N4 = maps:get(N2, NMap, N2),
@@ -366,14 +397,14 @@ move_link({N1, N2}, NN, NMap) ->
 %% @doc Searches for a path between N1 and N2. 
 %% @end
 %%-------------------------------------------------------------------
--spec path({From, To}, NN) -> Path when
-      From :: d_node(),
-      To   :: d_node(),
-      NN   :: network(),
-      Path :: [d_node()] | not_found.
-path({ N, N},  _) -> [N];
-path({N1,N2}, NN) ->
-    Nexts = out_nodes(N1, NN),
+-spec seq_path({From, To}, NN) -> Path when
+    From :: d_node(),
+    To   :: d_node(),
+    NN   :: network(),
+    Path :: [d_node()] | not_found.
+seq_path({ N, N},  _) -> [N];
+seq_path({N1,N2}, NN) ->
+    Nexts = out_seq(N1, NN),
     one_path(Nexts, N2, [], [N1], [N1], NN).
 
 %%-------------------------------------------------------------------
@@ -396,7 +427,7 @@ in_links(NN) ->
     Links :: [link:link()].
 in_links(N2, NN) ->
     In = ?IN(maps:get(N2, NN#network.nodes)),
-    [{N1,N2} || {N1,link} <- maps:to_list(In)].
+    [{N1,N2} || N1 <- maps:keys(In)].
 
 %%-------------------------------------------------------------------
 %% @doc Returns all links incident on the end of the network.  
@@ -418,7 +449,7 @@ out_links(NN) ->
     Links :: [link:link()].
 out_links(N1, NN) ->
     Out = ?OUT(maps:get(N1, NN#network.nodes)),
-    [{N1,N2} || {N2,link} <- maps:to_list(Out)].
+    [{N1,N2} || N2 <- maps:keys(Out)].
 
 %%-------------------------------------------------------------------
 %% @doc Returs all network links. 
@@ -473,7 +504,7 @@ one_path([N|Ns], W, Cont, Xs, Ps, NN) ->
         true  -> % That neuron were evluated before
             one_path(Ns, W, Cont, Xs, Ps, NN);
         false -> % That neuron out neighbours can be check firts
-            Nexts = out_nodes(N,NN),
+            Nexts = out_seq(N,NN),
             one_path(Nexts, W, [{Ns,Ps}|Cont], [N|Xs], [N|Ps], NN)
     end;
 one_path([], W, [{Ns,Ps}|Cont], Xs, _, NN) -> % End of neighbours
@@ -482,23 +513,23 @@ one_path([], _,             [],  _, _,  _) -> % No seq path
     not_found.
 
 % Inserts a link on the nodes ---------------------------------------
-insert_link(#network{nodes=Nodes} = NN,  N,  N) ->
+insert_link(Type, #network{nodes=Nodes} = NN,  N,  N) ->
     #{N:= Conn} = Nodes,
     NN#network{nodes = Nodes#{
-        N := add_out(add_in(Conn, N, link), N, link)
+        N := add_out(add_in(Conn, N, Type), N, Type)
     }};
-insert_link(#network{nodes=Nodes} = NN, N1, N2) ->
+insert_link(Type, #network{nodes=Nodes} = NN, N1, N2) ->
     #{N1:= ConnN1, N2:=ConnN2} = Nodes,
     NN#network{nodes = Nodes#{
-        N1 := add_out(ConnN1, N2, link),
-        N2 := add_in( ConnN2, N1, link)
+        N1 := add_out(ConnN1, N2, Type),
+        N2 := add_in( ConnN2, N1, Type)
     }}.
 
-add_out(#cn{out=Out} = ConnN1, N2, What) -> 
-    ConnN1#cn{out = Out#{N2 => What}}.
+add_out(#cn{out=Out} = ConnN1, N2, Type) -> 
+    ConnN1#cn{out = Out#{N2 => Type}}.
 
-add_in(#cn{in=In} = ConnN2, N1, What) -> 
-    ConnN2#cn{in = In#{N1 => What}}.
+add_in(#cn{in=In} = ConnN2, N1, Type) -> 
+    ConnN2#cn{in = In#{N1 => Type}}.
 
 % Removes a link from the nodes -------------------------------------
 remove_link(#network{nodes=Nodes} = NN,  N,  N) ->

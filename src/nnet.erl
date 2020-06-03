@@ -530,14 +530,14 @@ random_split(_Other) ->
 
 % Checks there is a path from the start -----------------------------
 path_from_start(N, NNET) -> 
-    case network:path({start,N}, NNET) of
+    case network:seq_path({start,N}, NNET) of
         not_found -> false;
         _Path     -> true 
     end.
 
 % Checks there is a path to the end ---------------------------------
 path_to_end(N, NNET) -> 
-    case network:path({N,'end'}, NNET) of
+    case network:seq_path({N,'end'}, NNET) of
         not_found -> false;
         _Path     -> true 
     end.

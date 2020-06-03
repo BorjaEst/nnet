@@ -373,7 +373,7 @@ is_activation(Activation, Neuron) ->
 % Checks that the network is on the first path between From->To -----
 is_in_path({From,To}, NNET, Neuron) -> 
     ?HEAD("Is neuron member of the path?"),
-    Path = network:path({From,To}, NNET),
+    Path = network:seq_path({From,To}, NNET),
     ?INFO("Neuron: ", Neuron),
     ?INFO("Path: ", Path),
     true = lists:member(Neuron, Path),
@@ -383,9 +383,9 @@ is_in_path({From,To}, NNET, Neuron) ->
 is_not_erasable({From,To}, NNET_0) -> 
     ?HEAD("Is neuron broken if link deleted?"),
     NNET_1 = network:del_link({From,To}, NNET_0),
-    PathStartToTo = network:path({start,To}, NNET_1),
+    PathStartToTo = network:seq_path({start,To}, NNET_1),
     ?INFO("Path from start->to if deleted: ",{{start,To}, PathStartToTo}),
-    PathFromToEnd = network:path({From,'end'}, NNET_1),
+    PathFromToEnd = network:seq_path({From,'end'}, NNET_1),
     ?INFO("Path from from->end if deleted: ", {{From,'end'}, PathFromToEnd}),
     ?INFO("At least one should be: ", not_found),
     true = (not_found==PathStartToTo) or (not_found==PathFromToEnd),

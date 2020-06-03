@@ -4,11 +4,9 @@
      {modules, [
          link,
          network,
-         nnet_app,
          nnet
      ]}, 
      {registered, []}, 
-     {mod, {nnet_app, []}},
      {applications, [kernel, stdlib, mnesia]},
      {env, []},
      {maintainers, []},

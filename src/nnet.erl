@@ -10,7 +10,7 @@
 -module(nnet).
 
 %% API
--export([new/2, edit/2, clone/1, concat/1, delete/1]). 
+-export([start_tables/0, new/2, edit/2, clone/1, concat/1, delete/1]).
 -export([info/1, inputs/1, outputs/1, all_networks/0]).
 %% Transactions to run inside 'fun edit/2'
 -export([reinitialise_bias/2, switch_activation/3]).
@@ -23,7 +23,7 @@
 -export_type([id/0, neuron/0, link/0, info/0]).
 
 -type id()        :: {network, reference()}.
--type network()   :: network().
+-type network()   :: network:network().
 -type neuron()    :: neuron:id().
 -type link()      :: {From::neuron(), To::neuron()}.
 -type result(Res) :: {'atomic', Res} | {aborted, Reason::term()}.
@@ -32,6 +32,17 @@
 %%%===================================================================
 %%% Main API functions
 %%%===================================================================
+
+%%-------------------------------------------------------------------
+%% @doc Creates a new network and returns its id.
+%% @end
+%%-------------------------------------------------------------------
+-spec start_tables() -> ok.
+start_tables() ->
+    true = new_table(network, network:record_fields()),
+    true = new_table(   link,     [  from_to, weight]),
+    true = new_table( neuron,     [reference,   data]),
+    ok.
 
 %%-------------------------------------------------------------------
 %% @doc Creates a new network and returns its id.
@@ -516,6 +527,22 @@ add_output(Neighbours, NNET_0) ->
 %%====================================================================
 %% Internal functions
 %%====================================================================
+
+% Creates a new table -----------------------------------------------
+new_table(Name, Attributes) ->
+    case mnesia:create_table(Name, [{attributes, Attributes}]) of
+        {atomic, ok} -> true;
+        {aborted, {already_exists, Name}} -> check(Name, Attributes);
+        Other -> Other
+    end.
+
+% Checks the table has the correct attributes -----------------------
+-define(BAD_TABLE, "table ~s exists using invalid attributtes").
+check(Name, Attributes) ->
+    case mnesia:table_info(Name, attributes) of 
+        Attributes -> true;
+        _ -> exit(io_lib:format(?BAD_TABLE, [Name]))
+    end.
 
 % Copies the neurons and retruns a map #{Old=>New} ------------------
 map_copy(Neurons) -> map_copy(Neurons, #{}).

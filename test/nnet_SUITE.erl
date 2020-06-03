@@ -42,7 +42,7 @@ suite() ->
 %%--------------------------------------------------------------------
 init_per_suite(Config) ->
     ok = application:start(mnesia),
-    ok = application:start(nnet),
+    ok = nnet:start_tables(),
     Config.
 
 %%--------------------------------------------------------------------
@@ -51,7 +51,6 @@ init_per_suite(Config) ->
 %%--------------------------------------------------------------------
 end_per_suite(_Config) ->
     ok = application:stop(mnesia),
-    ok = application:stop(nnet),
     ok.
 
 %%--------------------------------------------------------------------

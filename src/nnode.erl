@@ -1,18 +1,18 @@
 %%%-------------------------------------------------------------------
-%%% @doc The neuron is a signal processing element. It accepts
+%%% @doc The nnode is a signal processing element. It accepts
 %%% signals, accumulates them into an ordered vector, then processes
 %%% this input vector to produce an output, and finally passes the
 %%% output to other elements it is connected to.
 %%% @end
 %%%-------------------------------------------------------------------
--module(neuron).
+-module(nnode).
 -compile([export_all, nowarn_export_all]). %% TODO: To delete after build
 
 %% API
 -export([]).
 -export_type([id/0, properties/0]).
 
--type id() ::   {neuron, reference()}.
+-type id() ::   {nnode, reference()}.
 -type weight() :: number() | undefined.
 -type properties() :: #{activation  := atom(),
                         aggregation := atom(),
@@ -25,7 +25,7 @@
 %%%===================================================================
 
 %%--------------------------------------------------------------------
-%% @doc Creates a new neuron. Some properties can be defined.
+%% @doc Creates a new nnode. Some properties can be defined.
 %% Should run inside a mnesia transaction
 %% @end
 %%--------------------------------------------------------------------
@@ -38,53 +38,53 @@ new(Properties) ->
         initializer => maps:get(initializer, Properties,    glorot),
         bias        => maps:get(initializer, Properties, undefined)
     },
-    ok = mnesia:write({neuron, Key, Data}),
-    {neuron, Key}.
+    ok = mnesia:write({nnode, Key, Data}),
+    {nnode, Key}.
 
 %%--------------------------------------------------------------------
-%% @doc Returns the neuron properties.
+%% @doc Returns the nnode properties.
 %% Should run inside a mnesia transaction
 %% @end
 %%--------------------------------------------------------------------
 -spec read(id()) -> properties().
-read({neuron, Key}) -> 
-    case mnesia:read({neuron, Key}) of 
-        [{neuron, Key, Data}] -> Data;
+read({nnode, Key}) -> 
+    case mnesia:read({nnode, Key}) of 
+        [{nnode, Key, Data}] -> Data;
         []                    -> error(not_found)
     end.
 
 %%--------------------------------------------------------------------
-%% @doc Returns a copy of the neuron with a different id.
+%% @doc Returns a copy of the nnode with a different id.
 %% Should run inside a mnesia transaction
 %% @end
 %%--------------------------------------------------------------------
--spec copy(Neuron::id()) -> Copy::id().
+-spec copy(Nnode::id()) -> Copy::id().
 copy(Id) -> new(read(Id)).
 
 %%--------------------------------------------------------------------
-%% @doc Edits the neuron properties.
+%% @doc Edits the nnode properties.
 %% Should run inside a mnesia transaction
 %% @end
 %%--------------------------------------------------------------------
 -spec edit(Id::id(), properties()) -> Id::id().
-edit({neuron, Key}, Prop) -> 
-    case mnesia:wread({neuron, Key}) of 
-        [{neuron, Key, Data}] -> 
-            ok = mnesia:write({neuron, Key, maps:merge(Data, Prop)}),
-            {neuron, Key};
+edit({nnode, Key}, Prop) -> 
+    case mnesia:wread({nnode, Key}) of 
+        [{nnode, Key, Data}] -> 
+            ok = mnesia:write({nnode, Key, maps:merge(Data, Prop)}),
+            {nnode, Key};
         []                    -> 
             error(not_found)
     end. 
 
 %%--------------------------------------------------------------------
-%% @doc Deletes the neuron and the properties.
+%% @doc Deletes the nnode and the properties.
 %% Should run inside a mnesia transaction
 %% @end
 %%--------------------------------------------------------------------
 -spec delete(Id::id()) -> ok.
-delete({neuron, Key}) -> 
-    ok = mnesia:delete({neuron, Key}),
-    {neuron, Key}.
+delete({nnode, Key}) -> 
+    ok = mnesia:delete({nnode, Key}),
+    {nnode, Key}.
 
 
 %%====================================================================

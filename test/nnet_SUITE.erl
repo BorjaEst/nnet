@@ -22,7 +22,7 @@
                        x2    => ['end', y1],
                        y2    => ['end', x1],
                        'end' => []}).
--define(NEURON_PROPERTIES, #{activation  => direct,
+-define(NNODE_PROPERTIES, #{activation  => direct,
                              aggregation => direct,
                              initializer => ones}).
 
@@ -61,7 +61,7 @@ end_per_suite(_Config) ->
 %% Reason = term()
 %%--------------------------------------------------------------------
 init_per_group(_GroupName, Config) ->
-    {atomic, Id} = nnet:new(?NETWORK_MAP, ?NEURON_PROPERTIES),
+    {atomic, Id} = nnet:new(?NETWORK_MAP, ?NNODE_PROPERTIES),
     [{network_id, Id} | Config].
 
 %%--------------------------------------------------------------------
@@ -107,7 +107,7 @@ end_per_testcase(_TestCase, _Config) ->
 %%--------------------------------------------------------------------
 groups() ->
     [
-        {in_sequence_neuron_edits, [sequence, shuffle],
+        {in_sequence_nnode_edits, [sequence, shuffle],
          [
              correct_bias_reinitialisation,
              correct_switch_activation
@@ -126,9 +126,9 @@ groups() ->
         },
         {in_sequence_network_edits, [sequence, shuffle],
          [
-             correct_neuron_copy,
-             correct_neuron_clone,
-             correct_neuron_double
+             correct_nnode_copy,
+             correct_nnode_clone,
+             correct_nnode_double
          ]
         },
         {in_parallel_edits, [parallel, shuffle],
@@ -141,9 +141,9 @@ groups() ->
         %  [correct_move_all                  || _ <- lists:seq(1,5)] ++
         %  [correct_move_allowed              || _ <- lists:seq(1,5)] ++
          [correct_delete_of_weights         || _ <- lists:seq(1,5)] ++
-         [correct_neuron_copy               || _ <- lists:seq(1,5)] ++
-         [correct_neuron_clone              || _ <- lists:seq(1,5)] ++
-         [correct_neuron_double             || _ <- lists:seq(1,5)] ++
+         [correct_nnode_copy               || _ <- lists:seq(1,5)] ++
+         [correct_nnode_clone              || _ <- lists:seq(1,5)] ++
+         [correct_nnode_double             || _ <- lists:seq(1,5)] ++
          []
         }
     ].
@@ -157,7 +157,7 @@ groups() ->
 %%--------------------------------------------------------------------
 all() ->
     [ 
-        {group, in_sequence_neuron_edits},
+        {group, in_sequence_nnode_edits},
         {group, in_sequence_connections_edits},
         {group, in_sequence_network_edits}
         % {group, in_parallel_edits}
@@ -189,12 +189,12 @@ correct_bias_reinitialisation(Config) ->
     ?HEAD("Correct bias reinitialisation ........................."),
     Test = 
         fun(NNET_0) -> 
-            Neuron = random_neuron(NNET_0),
-            neuron:edit(Neuron, #{bias=>1.0}),
-            ok = is_bias_initialised(Neuron),
-            ?INFO("reinitialising bias for neuron: ", Neuron),
-            NNET_1 = nnet:reinitialise_bias([Neuron], NNET_0),
-            ok = is_bias_not_initialised(Neuron),
+            Nnode = random_nnode(NNET_0),
+            nnode:edit(Nnode, #{bias=>1.0}),
+            ok = is_bias_initialised(Nnode),
+            ?INFO("reinitialising bias for nnode: ", Nnode),
+            NNET_1 = nnet:reinitialise_bias([Nnode], NNET_0),
+            ok = is_bias_not_initialised(Nnode),
             NNET_1
         end,
     {atomic, Result} = nnet:edit(?config(network_id, Config), Test),
@@ -205,12 +205,12 @@ correct_switch_activation(Config) ->
     ?HEAD("Correct activation switch ............................."),
     Test = 
         fun(NNET_0) -> 
-            Neuron = random_neuron(NNET_0),
-            neuron:edit(Neuron, #{activation=>direct}),
-            ok = is_activation(direct, Neuron),
-            ?INFO("Switching activation to: ", {Neuron, elu}),
-            NNET_1 = nnet:switch_activation([Neuron], NNET_0, elu),
-            ok = is_activation(elu, Neuron),
+            Nnode = random_nnode(NNET_0),
+            nnode:edit(Nnode, #{activation=>direct}),
+            ok = is_activation(direct, Nnode),
+            ?INFO("Switching activation to: ", {Nnode, elu}),
+            NNET_1 = nnet:switch_activation([Nnode], NNET_0, elu),
+            ok = is_activation(elu, Nnode),
             NNET_1
         end,
     {atomic, Result} = nnet:edit(?config(network_id, Config), Test),
@@ -218,10 +218,10 @@ correct_switch_activation(Config) ->
 
 % -------------------------------------------------------------------
 correct_connect_allowed(Config) -> 
-    ?HEAD("Correct connection of neurons when allowed ............"),
+    ?HEAD("Correct connection of nnodes when allowed ............"),
     Test = 
         fun(NNET_0) -> 
-            Links = [{F,T} || F<-random_neurons(NNET_0), T<-random_neurons(NNET_0)],
+            Links = [{F,T} || F<-random_nnodes(NNET_0), T<-random_nnodes(NNET_0)],
             ?INFO("Connecting allowed links of: ", Links),
             NNET_1 = nnet:connect_allowed(Links, NNET_0),
             Expected_links = Links,
@@ -236,7 +236,7 @@ correct_disconnect_all(Config) ->
     ?HEAD("Correct disconnection of allowed without error ........"),
     Test = 
         fun(NNET_0) -> 
-            Links = [{F,T} || F<-random_neurons(NNET_0), T<-random_neurons(NNET_0)],
+            Links = [{F,T} || F<-random_nnodes(NNET_0), T<-random_nnodes(NNET_0)],
             ?INFO("Disconnecting all: ", Links),
             NNET_1 = nnet:disconnect_all(Links, NNET_0),
             [ok = network_SUITE:is_not_in_network(X, NNET_1) || X <- Links],
@@ -247,10 +247,10 @@ correct_disconnect_all(Config) ->
 
 % -------------------------------------------------------------------
 correct_disconnect_allowed(Config) -> 
-    ?HEAD("Correct disconnection of neurons when allowed ........."),
+    ?HEAD("Correct disconnection of nnodes when allowed ........."),
     Test = 
         fun(NNET_0) -> 
-            Links = [{F,T} || F<-random_neurons(NNET_0), T<-random_neurons(NNET_0)],
+            Links = [{F,T} || F<-random_nnodes(NNET_0), T<-random_nnodes(NNET_0)],
             ?INFO("Disconnecting allowed links of: ", Links),
             NNET_1 = nnet:disconnect_allowed(Links, NNET_0),
             RemainingLinks = intersection(Links, NNET_1),
@@ -266,7 +266,7 @@ correct_delete_of_weights(Config) ->
     ?HEAD("Correct delete of weights ............................."),
     Test = 
         fun(NNET_0) -> 
-            Links = [{F,T} || F<-random_neurons(NNET_0), T<-random_neurons(NNET_0)],
+            Links = [{F,T} || F<-random_nnodes(NNET_0), T<-random_nnodes(NNET_0)],
             [link:write(Link, 1.0) || Link <- Links],
             [ok = is_link_initialised(Link) || Link <- Links],
             ?INFO("Deleting links values: ", Links),
@@ -278,16 +278,16 @@ correct_delete_of_weights(Config) ->
     ?END(Result).
 
 % -------------------------------------------------------------------
-correct_neuron_copy(Config) ->
-    ?HEAD("Correct neuron copy ..................................."),
+correct_nnode_copy(Config) ->
+    ?HEAD("Correct nnode copy ..................................."),
     Test = 
         fun(NNET_0) -> 
-            Neurons = random_neurons(NNET_0),
-            ?INFO("Copying the neurons: ", Neurons),
-            NNET_1 = nnet:copy(Neurons, NNET_0),
-            ok = has_network_increased(length(Neurons), NNET_1, NNET_0), 
-            Copies = network:neurons(NNET_1) -- network:neurons(NNET_0),
-            ?INFO("New from copy neurons: ", Copies),
+            Nnodes = random_nnodes(NNET_0),
+            ?INFO("Copying the nnodes: ", Nnodes),
+            NNET_1 = nnet:copy(Nnodes, NNET_0),
+            ok = has_network_increased(length(Nnodes), NNET_1, NNET_0), 
+            Copies = network:nnodes(NNET_1) -- network:nnodes(NNET_0),
+            ?INFO("New from copy nnodes: ", Copies),
             [ok = is_link_weight(undefined, L) || N <- Copies, L <- network:links(N,NNET_1)],
             NNET_1
         end,
@@ -295,17 +295,17 @@ correct_neuron_copy(Config) ->
     ?END(Result).
 
 % -------------------------------------------------------------------
-correct_neuron_clone(Config) ->
-    ?HEAD("Correct neuron clone .................................."),
+correct_nnode_clone(Config) ->
+    ?HEAD("Correct nnode clone .................................."),
     Test = 
         fun(NNET_0) -> 
-            Neurons = random_neurons(NNET_0),
-            [link:write(L,-1.0) || N <- Neurons, L <- network:links(N,NNET_0)],
-            ?INFO("Cloning the neurons: ", Neurons),
-            NNET_1 = nnet:clone(Neurons, NNET_0),
-            ok = has_network_increased(length(Neurons), NNET_1, NNET_0), 
-            Clones = network:neurons(NNET_1) -- network:neurons(NNET_0),
-            ?INFO("New from clone neurons: ", Clones),
+            Nnodes = random_nnodes(NNET_0),
+            [link:write(L,-1.0) || N <- Nnodes, L <- network:links(N,NNET_0)],
+            ?INFO("Cloning the nnodes: ", Nnodes),
+            NNET_1 = nnet:clone(Nnodes, NNET_0),
+            ok = has_network_increased(length(Nnodes), NNET_1, NNET_0), 
+            Clones = network:nnodes(NNET_1) -- network:nnodes(NNET_0),
+            ?INFO("New from clone nnodes: ", Clones),
             [ok = is_link_weight(-1.0, L) || N <- Clones, L <- network:links(N,NNET_1)],
             NNET_1
         end,
@@ -313,29 +313,29 @@ correct_neuron_clone(Config) ->
     ?END(Result).
 
 % -------------------------------------------------------------------
-correct_neuron_double(Config) ->
-    ?HEAD("Correct neuron double ................................."),
+correct_nnode_double(Config) ->
+    ?HEAD("Correct nnode double ................................."),
     Test = 
         fun(NNET_0) -> 
-            Neurons = random_neurons(NNET_0),
-            [link:write(L,2.0) || N <- Neurons, L <- network:links(N,NNET_0)],
-            ?INFO("Doubling the neurons: ", Neurons),
-            NNET_1 = nnet:double(Neurons, NNET_0),
-            ok = has_network_increased(length(Neurons), NNET_1, NNET_0), 
-            Doubled = network:neurons(NNET_1) -- network:neurons(NNET_0),
-            ?INFO("New from doubled neurons: ", Doubled),
+            Nnodes = random_nnodes(NNET_0),
+            [link:write(L,2.0) || N <- Nnodes, L <- network:links(N,NNET_0)],
+            ?INFO("Doubling the nnodes: ", Nnodes),
+            NNET_1 = nnet:double(Nnodes, NNET_0),
+            ok = has_network_increased(length(Nnodes), NNET_1, NNET_0), 
+            Doubled = network:nnodes(NNET_1) -- network:nnodes(NNET_0),
+            ?INFO("New from doubled nnodes: ", Doubled),
             [ok = is_link_weight(2.0,L) || N      <- Doubled, 
                                           {_,T}=L <- network:links(N,NNET_1), 
                                           lists:member(T,Doubled)],
             [ok = is_link_weight(1.0,L) || N      <- Doubled, 
                                           {_,T}=L <- network:links(N,NNET_1), 
                                           not lists:member(T,Doubled)], 
-            [ok = is_link_weight(2.0,L) || N      <- Neurons, 
+            [ok = is_link_weight(2.0,L) || N      <- Nnodes, 
                                           {_,T}=L <- network:links(N,NNET_1), 
-                                          lists:member(T,Neurons)],
-            [ok = is_link_weight(1.0,L) || N      <- Neurons, 
+                                          lists:member(T,Nnodes)],
+            [ok = is_link_weight(1.0,L) || N      <- Nnodes, 
                                           {_,T}=L <- network:links(N,NNET_1), 
-                                          not lists:member(T,Neurons)], 
+                                          not lists:member(T,Nnodes)], 
             NNET_1
         end,
     {atomic, Result} = nnet:edit(?config(network_id, Config), Test),
@@ -346,41 +346,41 @@ correct_neuron_double(Config) ->
 % INDIVIDUAL TEST FUNCTIONS ------------------------------------------
 
 % Checks the value of the bias is NOT undefined ---------------------
-is_bias_initialised(Neuron) -> 
+is_bias_initialised(Nnode) -> 
     ?HEAD("Is bias initialised?"),
-    #{bias:=Bias} = neuron:read(Neuron),
+    #{bias:=Bias} = nnode:read(Nnode),
     ?INFO("Bias: ", Bias),
     true = is_float(Bias),
     ?END(ok).
 
 % Checks the value of the bias is undefined -------------------------
-is_bias_not_initialised(Neuron) -> 
+is_bias_not_initialised(Nnode) -> 
     ?HEAD("Is bias initialised?"),
-    #{bias:=Bias} = neuron:read(Neuron),
+    #{bias:=Bias} = nnode:read(Nnode),
     ?INFO("Bias: ", Bias),
     undefined = Bias,
     ?END(ok).
 
-% Checks the activation matches with the neuron activation ----------
-is_activation(Activation, Neuron) -> 
-    ?HEAD("Is neuron activation correct?"),
-    #{activation:=Func} = neuron:read(Neuron),
+% Checks the activation matches with the nnode activation ----------
+is_activation(Activation, Nnode) -> 
+    ?HEAD("Is nnode activation correct?"),
+    #{activation:=Func} = nnode:read(Nnode),
     ?INFO("{activation:, expected:} ", {Activation, Func}),
     Func = Activation,
     ?END(ok).
 
 % Checks that the network is on the first path between From->To -----
-is_in_path({From,To}, NNET, Neuron) -> 
-    ?HEAD("Is neuron member of the path?"),
+is_in_path({From,To}, NNET, Nnode) -> 
+    ?HEAD("Is nnode member of the path?"),
     Path = network:seq_path({From,To}, NNET),
-    ?INFO("Neuron: ", Neuron),
+    ?INFO("Nnode: ", Nnode),
     ?INFO("Path: ", Path),
-    true = lists:member(Neuron, Path),
+    true = lists:member(Nnode, Path),
     ?END(ok). 
 
 % Checks that the network is on the first path between From->To -----
 is_not_erasable({From,To}, NNET_0) -> 
-    ?HEAD("Is neuron broken if link deleted?"),
+    ?HEAD("Is nnode broken if link deleted?"),
     NNET_1 = network:del_link({From,To}, NNET_0),
     PathStartToTo = network:seq_path({start,To}, NNET_1),
     ?INFO("Path from start->to if deleted: ",{{start,To}, PathStartToTo}),
@@ -418,11 +418,11 @@ is_link_weight(Expected, Link) ->
     Expected = Weight,
     ?END(ok).  
 
-% Checks the number of neurons increased in the defined number ------
+% Checks the number of nnodes increased in the defined number ------
 has_network_increased(Expected, NNET_1, NNET_0) -> 
     ?HEAD("Has the network increased in the specified value?"),
-    Size_0 = network:no_neurons(NNET_0),
-    Size_1 = network:no_neurons(NNET_1),
+    Size_0 = network:no_nnodes(NNET_0),
+    Size_1 = network:no_nnodes(NNET_1),
     ?INFO("{Size before, Size after}: ", {Size_0, Size_1}),
     ?INFO("Expected increment: ", Expected),
     Expected = Size_1 - Size_0,
@@ -432,16 +432,16 @@ has_network_increased(Expected, NNET_1, NNET_0) ->
 % --------------------------------------------------------------------
 % SPECIFIC HELPER FUNCTIONS ------------------------------------------
 
-% Returns a random neuron from the network --------------------------
-random_neuron(NNET) -> 
-    ltools:randnth(network:neurons(NNET)).
+% Returns a random nnode from the network --------------------------
+random_nnode(NNET) -> 
+    ltools:randnth(network:nnodes(NNET)).
 
-% Return random neurons from the network ----------------------------
-random_neurons(NNET) -> 
-    Neurons = network:neurons(NNET),
-    case ltools:rand(Neurons, 0.75) of 
-        []       -> random_neurons(NNET); % Try again
-        Neurons  -> random_neurons(NNET); % Try again
+% Return random nnodes from the network ----------------------------
+random_nnodes(NNET) -> 
+    Nnodes = network:nnodes(NNET),
+    case ltools:rand(Nnodes, 0.75) of 
+        []       -> random_nnodes(NNET); % Try again
+        Nnodes  -> random_nnodes(NNET); % Try again
         RandList -> RandList              % Ok
     end.
 

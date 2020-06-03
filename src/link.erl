@@ -25,8 +25,8 @@
 %% @end
 %%-------------------------------------------------------------------
 -spec read({From, To}) -> weight() when 
-    From :: neuron:id(),
-    To   :: neuron:id().
+    From :: nnode:id(),
+    To   :: nnode:id().
 read({From, To}) -> 
     case mnesia:read({link, {From,To}}) of 
         [{_,_,Weight}] -> Weight;

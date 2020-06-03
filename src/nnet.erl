@@ -3,7 +3,7 @@
 %%% @doc
 %%%
 %%% -TODO: Check if it is better to act as well on the bias.
-%%% -TODO: Might be interesting to test in "divide_neuron" to test 
+%%% -TODO: Might be interesting to test in "divide_nnode" to test 
 %%%        dividing only the inputs or only the outputs.
 %%% @end
 %%%-------------------------------------------------------------------
@@ -20,12 +20,12 @@
 -export([copy/2, clone/2, double/2, split/2, delete/2, merge/2]).
 -export([add_input/2, add_output/2]).
 %% Exported types
--export_type([id/0, neuron/0, link/0, info/0]).
+-export_type([id/0, nnode/0, link/0, info/0]).
 
 -type id()        :: {network, reference()}.
 -type network()   :: network:network().
--type neuron()    :: neuron:id().
--type link()      :: {From::neuron(), To::neuron()}.
+-type nnode()    :: nnode:id().
+-type link()      :: {From::nnode(), To::nnode()}.
 -type result(Res) :: {'atomic', Res} | {aborted, Reason::term()}.
 -type info()      :: network:info().
 
@@ -41,7 +41,7 @@
 start_tables() ->
     true = new_table(network, network:record_fields()),
     true = new_table(   link,     [  from_to, weight]),
-    true = new_table( neuron,     [reference,   data]),
+    true = new_table( nnode,     [reference,   data]),
     ok.
 
 %%-------------------------------------------------------------------
@@ -50,7 +50,7 @@ start_tables() ->
 %%-------------------------------------------------------------------
 -spec new(Map, Properties) -> result(Id::id()) when 
     Map        :: #{Node => ConnectionsTo::[Node]},
-    Properties :: neuron:properties(),
+    Properties :: nnode:properties(),
     Node       :: atom() | 'start'.
 new(Map, Properties) -> 
     mnesia:transaction(
@@ -58,7 +58,7 @@ new(Map, Properties) ->
             RMap = create_nodes(Map, Properties),
             NMap = rename(Map, RMap),
             NNET = network:from_map(NMap),
-            [ok = check_neuron(N, NNET) || N <- network:neurons(NNET)],
+            [ok = check_nnode(N, NNET) || N <- network:nnodes(NNET)],
             ok   = mnesia:write(NNET),
             {network, network:key(NNET)}
         end
@@ -68,7 +68,7 @@ create_nodes(Map, P) -> map_nodes(maps:keys(Map), #{}, P).
 
 map_nodes([start|Rx], RMap, P) -> map_nodes(Rx, RMap#{start => start}, P);
 map_nodes(['end'|Rx], RMap, P) -> map_nodes(Rx, RMap#{'end' => 'end'}, P);
-map_nodes([    X|Rx], RMap, P) -> map_nodes(Rx, RMap#{X=>neuron:new(P)}, P);
+map_nodes([    X|Rx], RMap, P) -> map_nodes(Rx, RMap#{X=>nnode:new(P)}, P);
 map_nodes(        [], RMap, _) -> RMap. 
 
 rename(Map, RMap) when is_map(Map) -> 
@@ -109,8 +109,8 @@ clone(Id) ->
     mnesia:transaction(
         fun() -> 
             [NN]    = mnesia:read(Id),
-            Neurons = network:neurons(NN),
-            NMap    = map_copy(Neurons),
+            Nnodes = network:nnodes(NN),
+            NMap    = map_copy(Nnodes),
             Clone = network:rename(network:copy(NN), NMap),
             [link:copy({From,To}, NMap) || {From,To} <- network:links(NN)],
             ok = mnesia:write(Clone),
@@ -122,7 +122,7 @@ clone(Id) ->
 %% @doc Concatenates a list of networks connecting each network 
 %% output to all inputs of the next network in the list.
 %% The merged networks are deleted in the process but not its links
-%% and neurons, which are only moved to the new network.
+%% and nnodes, which are only moved to the new network.
 %% @end
 %%-------------------------------------------------------------------
 -spec concat(Ids) -> result(Concatenated) when 
@@ -172,7 +172,7 @@ info(Id) ->
 %% @doc Returns the network inputs.
 %% @end
 %%-------------------------------------------------------------------
--spec inputs(Id::id()) -> Neurons::[neuron()].
+-spec inputs(Id::id()) -> Nnodes::[nnode()].
 inputs(Id) -> 
     [NN] = mnesia:dirty_read(Id),
     network:in_nodes(NN).
@@ -181,7 +181,7 @@ inputs(Id) ->
 %% @doc Returns the network outputs.
 %% @end
 %%-------------------------------------------------------------------
--spec outputs(Id::id()) -> Neurons::[neuron()].
+-spec outputs(Id::id()) -> Nnodes::[nnode()].
 outputs(Id) -> 
     [NN] = mnesia:dirty_read(Id),
     network:out_nodes(NN).
@@ -196,32 +196,32 @@ all_networks() ->
 
 
 %%%===================================================================
-%%% API: Neuron modifications
+%%% API: Nnode modifications
 %%%===================================================================
 
 %%-------------------------------------------------------------------
-%% @doc Reinitialises the neuron bias.
+%% @doc Reinitialises the nnode bias.
 %% Should run inside a network edit.
 %% @end
 %%-------------------------------------------------------------------
 -spec reinitialise_bias(Ns, NNET) -> NNET when 
     NNET :: network(),
-    Ns   :: [neuron()].
-reinitialise_bias(Neurons, NNET) -> 
-    [neuron:edit(N, #{bias=>undefined}) || N <- Neurons],
+    Ns   :: [nnode()].
+reinitialise_bias(Nnodes, NNET) -> 
+    [nnode:edit(N, #{bias=>undefined}) || N <- Nnodes],
     NNET.
 
 %%-------------------------------------------------------------------
-%% @doc Changes the activation function of a neuron.
+%% @doc Changes the activation function of a nnode.
 %% Should run inside a network edit.
 %% @end
 %%-------------------------------------------------------------------
 -spec switch_activation(Ns, NNET, Function_name) -> NNET when 
     NNET :: network(),
-    Ns   :: neuron(),
+    Ns   :: nnode(),
     Function_name :: atom().
-switch_activation(Neurons, NNET, Function_name) -> 
-    [neuron:edit(N, #{activation=>Function_name}) || N <- Neurons],
+switch_activation(Nnodes, NNET, Function_name) -> 
+    [nnode:edit(N, #{activation=>Function_name}) || N <- Nnodes],
     NNET.
 
 
@@ -230,7 +230,7 @@ switch_activation(Neurons, NNET, Function_name) ->
 %%%===================================================================
 
 %%-------------------------------------------------------------------
-%% @doc Creates links from all neurons in From to all neurons in To.
+%% @doc Creates links from all nnodes in From to all nnodes in To.
 %% If the link existed alreay, it is not modified.
 %% Note it might break the network, to do not break it use 
 %% connect_allowed/2 (Safe but slower).
@@ -245,7 +245,7 @@ connect_all(Links, NNET) ->
     lists:foldl(fun network:add_link/2, NNET, Links).
 
 %%-------------------------------------------------------------------
-%% @doc Deletes links from all neurons in From to all neurons in To.
+%% @doc Deletes links from all nnodes in From to all nnodes in To.
 %% If the link did not existed nothing happens.
 %% Note it might break the network, to do not break it use 
 %% disconnect_allowed/2 (Safe but slower).
@@ -270,13 +270,13 @@ disconnect_all(Links, NNET) ->
     Links   :: [link()],
     NNET_0  :: network(),
     NNET_1  :: network(),
-    Old     :: neuron:id(),
-    New     :: neuron:id().
+    Old     :: nnode:id(),
+    New     :: nnode:id().
 move_all(Links, NNET, NMap) -> 
     lists:foldl(fun network:move_link/2, NNET, [link:move(L,NMap) || L <- Links]). 
 
 %%-------------------------------------------------------------------
-%% @doc Creates only the allowed links from neurons in From to To.
+%% @doc Creates only the allowed links from nnodes in From to To.
 %% Should run inside a network edit.
 %% @end
 %%-------------------------------------------------------------------
@@ -291,8 +291,8 @@ connect_allowed([L|Lx], NNET_0) ->
 connect_allowed([], NNET) -> NNET.
 
 %%-------------------------------------------------------------------
-%% @doc Deletes only the allowed links from all neurons in From to 
-%% all neurons in To. If the link did not existed nothing happens.
+%% @doc Deletes only the allowed links from all nnodes in From to 
+%% all nnodes in To. If the link did not existed nothing happens.
 %% Should run inside a network edit.
 %% @end
 %%-------------------------------------------------------------------
@@ -322,8 +322,8 @@ disconnect_allowed([], NNET) -> NNET.
     Links   :: [link()],
     NNET_0  :: network(),
     NNET_1  :: network(),
-    Old     :: neuron:id(),
-    New     :: neuron:id().
+    Old     :: nnode:id(),
+    New     :: nnode:id().
 move_allowed([{N1,N2}|Lx], NNET_0, NMap) -> 
     NNET_1 = network:move_link(NNET_0, {N1,N2}, NMap), 
     case path_from_start(N2, NNET_1) of 
@@ -338,7 +338,7 @@ move_allowed([{N1,N2}|Lx], NNET_0, NMap) ->
 move_allowed([], NNET, _) -> NNET.
 
 %%-------------------------------------------------------------------
-%% @doc Reinitialises the weights of a neuron.
+%% @doc Reinitialises the weights of a nnode.
 %% Should run inside a network edit.
 %% @end
 %%-------------------------------------------------------------------
@@ -356,87 +356,87 @@ delete_weights(Links, NNET) ->
 %%%===================================================================
 
 %%-------------------------------------------------------------------
-%% @doc Copies the neurons, but not the link values.
+%% @doc Copies the nnodes, but not the link values.
 %% Should run inside a network edit.
 %% @end
 %%-------------------------------------------------------------------
--spec copy(Neurons, NNET_0) -> NNET_1 when 
-    Neurons :: [neuron()],
+-spec copy(Nnodes, NNET_0) -> NNET_1 when 
+    Nnodes :: [nnode()],
     NNET_0  :: network(),
     NNET_1  :: network().
-copy(Neurons, NNET) -> 
-    NMap = map_copy(Neurons),
-    Links = [link:map(L,NMap) || L <- links(Neurons, NNET)],
-    NNET_1 = lists:foldl(fun network:add_neuron/2, NNET, maps:values(NMap)),
+copy(Nnodes, NNET) -> 
+    NMap = map_copy(Nnodes),
+    Links = [link:map(L,NMap) || L <- links(Nnodes, NNET)],
+    NNET_1 = lists:foldl(fun network:add_nnode/2, NNET, maps:values(NMap)),
     connect_all(Links, NNET_1). 
 
 %%-------------------------------------------------------------------
-%% @doc Copies the neurons, together with the link values.
+%% @doc Copies the nnodes, together with the link values.
 %% Should run inside a network edit.
 %% @end
 %%-------------------------------------------------------------------
--spec clone(Neurons, NNET_0) -> NNET_1 when 
-    Neurons :: [neuron()],
+-spec clone(Nnodes, NNET_0) -> NNET_1 when 
+    Nnodes :: [nnode()],
     NNET_0  :: network(),
     NNET_1  :: network().
-clone(Neurons, NNET) -> 
-    NMap = map_copy(Neurons),
-    Links = [link:copy(L,NMap) || L <- links(Neurons, NNET)],
-    NNET_1 = lists:foldl(fun network:add_neuron/2, NNET, maps:values(NMap)),
+clone(Nnodes, NNET) -> 
+    NMap = map_copy(Nnodes),
+    Links = [link:copy(L,NMap) || L <- links(Nnodes, NNET)],
+    NNET_1 = lists:foldl(fun network:add_nnode/2, NNET, maps:values(NMap)),
     connect_all(Links, NNET_1). 
 
 %%-------------------------------------------------------------------
-%% @doc Clones the neurons, but new and old links are redeuced 50%. 
+%% @doc Clones the nnodes, but new and old links are redeuced 50%. 
 %% Should run inside a network edit.
 %% @end
 %%-------------------------------------------------------------------
--spec double(Neurons, NNET_0) -> NNET_1 when 
-    Neurons :: [neuron()],
+-spec double(Nnodes, NNET_0) -> NNET_1 when 
+    Nnodes :: [nnode()],
     NNET_0  :: network(),
     NNET_1  :: network().
-double(Neurons, NNET) -> 
-    NMap = map_copy(Neurons),
-    Links = [link:divide(L,NMap) || L <- links(Neurons, NNET)],
-    NNET_1 = lists:foldl(fun network:add_neuron/2, NNET, maps:values(NMap)),
+double(Nnodes, NNET) -> 
+    NMap = map_copy(Nnodes),
+    Links = [link:divide(L,NMap) || L <- links(Nnodes, NNET)],
+    NNET_1 = lists:foldl(fun network:add_nnode/2, NNET, maps:values(NMap)),
     connect_all(Links, NNET_1). 
 
 %%-------------------------------------------------------------------
-%% @doc Copies the neurons and distributes links (equal probability). 
+%% @doc Copies the nnodes and distributes links (equal probability). 
 %% The original network must have at least 2 inputs and 2 outputs. 
-%% The result neurons will have at least 1 input and 1 output.
+%% The result nnodes will have at least 1 input and 1 output.
 %% Should run inside a network edit.
 %% @end
 %%-------------------------------------------------------------------
--spec split(Neurons, NNET_0) -> NNET_1 when 
-    Neurons :: [neuron()],
+-spec split(Nnodes, NNET_0) -> NNET_1 when 
+    Nnodes :: [nnode()],
     NNET_0  :: network(),
     NNET_1  :: network().
-split(Neurons, NNET) -> 
-    NMap = map_copy(Neurons),
-    % ExternalLinksIn  = [{F,N} || N <- Neurons,
+split(Nnodes, NNET) -> 
+    NMap = map_copy(Nnodes),
+    % ExternalLinksIn  = [{F,N} || N <- Nnodes,
     %                              F <- network:in_nodes(NNET, N),
     %                              not is_map_key(F, NMap)],
-    % ExternalLinksOut = [{N,T} || N <- Neurons,
+    % ExternalLinksOut = [{N,T} || N <- Nnodes,
     %                              T <- network:out_nodes(NNET, N),
     %                              not is_map_key(T, NMap)],
-    % InternalLinks    = [{F,N} || N <- Neurons,
+    % InternalLinks    = [{F,N} || N <- Nnodes,
     %                              F <- network:in_nodes(NNET, N),
     %                              is_map_key(F, NMap)],
-    Links = [link:move(L,NMap) || L <- links(Neurons, Neurons), 
+    Links = [link:move(L,NMap) || L <- links(Nnodes, Nnodes), 
                                   0.5 > rand:uniform()],                                                
     NNET_1 = move_all(Links, NNET, NMap),
-    [ok = check_neuron(NNET_1, N) || N <- Neurons],
+    [ok = check_nnode(NNET_1, N) || N <- Nnodes],
     NNET_1.
 
 %%-------------------------------------------------------------------
-%% @doc Deletes a neuron together with all its connections and links.
-%% This action encadenates to all neurons without a path to the start
+%% @doc Deletes a nnode together with all its connections and links.
+%% This action encadenates to all nnodes without a path to the start
 %% or end.
 %% Should run inside a network edit.
 %% @end
 %%------------------------------------------------------------------- 
--spec delete(Neurons, NNET_0) -> NNET_1 when 
-    Neurons :: [neuron()],
+-spec delete(Nnodes, NNET_0) -> NNET_1 when 
+    Nnodes :: [nnode()],
     NNET_0  :: network(),
     NNET_1  :: network().
 delete(NNET_0, [N1|Nx]) -> 
@@ -459,13 +459,13 @@ delete([], NNET) ->
     NNET.
 
 %%-------------------------------------------------------------------
-%% @doc Merges all inputs and outputs of all neurons from left to 
-%% right. All neurons except the last are so deleted.
+%% @doc Merges all inputs and outputs of all nnodes from left to 
+%% right. All nnodes except the last are so deleted.
 %% Should run inside a network edit.
 %% @end
 %%-------------------------------------------------------------------
--spec merge(Neurons, NNET_0) -> NNET_1 when 
-    Neurons :: [neuron()],
+-spec merge(Nnodes, NNET_0) -> NNET_1 when 
+    Nnodes :: [nnode()],
     NNET_0  :: network(),
     NNET_1  :: network().
 merge(NNET, [N1,N2|Nx]) -> 
@@ -476,36 +476,36 @@ merge(NNET, [_]) ->
     NNET.
 
 %%-------------------------------------------------------------------
-%% @doc Adds a neuron as input. Connected neurons need to be 
+%% @doc Adds a nnode as input. Connected nnodes need to be 
 %% specified.
 %% Should run inside a network edit.
 %% @end
 %%-------------------------------------------------------------------
 -spec add_input(Neighbours, NNET_0) -> NNET_1 when 
-    Neighbours :: [neuron()],
+    Neighbours :: [nnode()],
     NNET_0     :: network(),
     NNET_1     :: network().
 add_input(Neighbours, NNET_0) ->
-    NInput = neuron:new(#{}),
+    NInput = nnode:new(#{}),
     connect_all(
-        network:add_neuron(NInput, NNET_0),
+        network:add_nnode(NInput, NNET_0),
         [{start,NInput}|[{NInput,N2} || N2 <- Neighbours]]
     ). 
 
 %%-------------------------------------------------------------------
-%% @doc Adds a neuron as output. Connected neurons need to be 
+%% @doc Adds a nnode as output. Connected nnodes need to be 
 %% specified.
 %% Should run inside a network edit.
 %% @end
 %%-------------------------------------------------------------------
 -spec add_output(Neighbours, NNET_0) -> NNET_1 when 
-    Neighbours :: [neuron()],
+    Neighbours :: [nnode()],
     NNET_0     :: network(),
     NNET_1     :: network().
 add_output(Neighbours, NNET_0) ->
-    NOutput = neuron:new(#{}),
+    NOutput = nnode:new(#{}),
     connect_all(
-        network:add_neuron(NOutput, NNET_0),
+        network:add_nnode(NOutput, NNET_0),
         [{NOutput,'end'}|[{N1,NOutput} || N1 <- Neighbours]]
     ). 
 
@@ -530,15 +530,15 @@ check(Name, Attributes) ->
         _ -> exit(io_lib:format(?BAD_TABLE, [Name]))
     end.
 
-% Copies the neurons and retruns a map #{Old=>New} ------------------
-map_copy(Neurons) -> map_copy(Neurons, #{}).
+% Copies the nnodes and retruns a map #{Old=>New} ------------------
+map_copy(Nnodes) -> map_copy(Nnodes, #{}).
 
-map_copy([N|Nx], NMap) -> map_copy(Nx, NMap#{N => neuron:copy(N)});
+map_copy([N|Nx], NMap) -> map_copy(Nx, NMap#{N => nnode:copy(N)});
 map_copy(    [], NMap) -> NMap. 
 
-% Returns a unique list of all neurons links ------------------------
-links(Neurons, NNET) -> 
-    lists:usort([L || N <- Neurons, L <- network:links(N, NNET)]).
+% Returns a unique list of all nnodes links ------------------------
+links(Nnodes, NNET) -> 
+    lists:usort([L || N <- Nnodes, L <- network:links(N, NNET)]).
 
 % Returns a non empty/full list of random elements ------------------
 random_split([A,B]) -> 
@@ -569,8 +569,8 @@ path_to_end(N, NNET) ->
         _Path     -> true 
     end.
 
-% Function that checks for neuron defects --------------------------- 
-check_neuron(N, NNET) -> 
+% Function that checks for nnode defects --------------------------- 
+check_nnode(N, NNET) -> 
     case path_from_start(N, NNET) of
         false -> {no_path, #{start=>N}};
         true  -> 

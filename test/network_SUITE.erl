@@ -124,8 +124,8 @@ all() ->
         test_get_links,
         test_add_links,
         test_del_links,
-        test_no_neurons,
-        test_get_neurons,
+        test_no_nnodes,
+        test_get_nnodes,
         test_add_nodes,
         test_del_nodes,
         test_concat_networks
@@ -204,7 +204,7 @@ test_del_links(_Config) ->
     ?END(ok).
 
 % -------------------------------------------------------------------
-test_no_neurons(_Config) -> 
+test_no_nnodes(_Config) -> 
     ?HEAD("Correct return of the network size ...................."),
     NN0 = seq_network(),
     Expected_Size = maps:size(?SEQ_NETWORK_MAP) - 2,
@@ -212,32 +212,32 @@ test_no_neurons(_Config) ->
     ?END(ok).
 
 % -------------------------------------------------------------------
-test_get_neurons(_Config) -> 
-    ?HEAD("Correct collection of the network neurons ............."),
+test_get_nnodes(_Config) -> 
+    ?HEAD("Correct collection of the network nnodes ............."),
     NN0 = seq_network(),
-    Expected_Neurons = maps:keys(?SEQ_NETWORK_MAP) -- [start,'end'],
-    ok = are_network_neurons(Expected_Neurons, NN0),
+    Expected_Nnodes = maps:keys(?SEQ_NETWORK_MAP) -- [start,'end'],
+    ok = are_network_nnodes(Expected_Nnodes, NN0),
     ?END(ok).
 
 % -------------------------------------------------------------------
 test_add_nodes(_Config) ->
-    ?HEAD("Correct addition of neurons in a network .............."),
+    ?HEAD("Correct addition of nnodes in a network .............."),
     NN0 = seq_network(),
     Node = n1,
     ok = is_not_in_network(Node, NN0),
-    NN1 = network:add_neuron(Node, NN0),
+    NN1 = network:add_nnode(Node, NN0),
     ?INFO("Node added to network: ", Node),
     ok = is_in_network(Node, NN1),
     ?END(ok).
 
 % -------------------------------------------------------------------
 test_del_nodes(_Config) ->
-    ?HEAD("Correct delete of neurons in a network ................"),
+    ?HEAD("Correct delete of nnodes in a network ................"),
     NN0 = seq_network(),
-    Node  = ltools:randnth(network:neurons(NN0)),
+    Node  = ltools:randnth(network:nnodes(NN0)),
     Links = network:links(Node, NN0), 
     [ok = is_in_network(X, NN0) || X <- [Node|Links]],
-    NN1 = network:del_neuron(Node, NN0),
+    NN1 = network:del_nnode(Node, NN0),
     ?INFO("Node removed from network: ", Node),
     [ok = is_not_in_network(X, NN1) || X <- [Node|Links]],
     ?END(ok).
@@ -249,8 +249,8 @@ test_concat_networks(_Config) ->
     NN2 = rcc_network(),
     NN3 = network:concat(NN1, NN2),
     ?INFO("Networks concatenated: ", NN3),
-    Expected_Neurons = network:neurons(NN1) ++ network:neurons(NN2),
-    ok = are_network_neurons(Expected_Neurons, NN3),
+    Expected_Nnodes = network:nnodes(NN1) ++ network:nnodes(NN2),
+    ok = are_network_nnodes(Expected_Nnodes, NN3),
     L_NN1 = [{F,T} || {F,T} <- network:links(NN1), T =/= 'end'],
     L_NN2 = [{F,T} || {F,T} <- network:links(NN2), F =/= start],
     L_New = [{F,T} || F <- network:out_nodes(NN1), T <- network:in_nodes(NN2)],
@@ -302,18 +302,18 @@ are_network_links(Links, NNET) ->
 is_network_size(N, NNET) -> 
     ?HEAD("Is network size correct?"),
     ?INFO("Expected size: ", N),
-    ?INFO("Network size: ", network:no_neurons(NNET)),
-    N = network:no_neurons(NNET),
+    ?INFO("Network size: ", network:no_nnodes(NNET)),
+    N = network:no_nnodes(NNET),
     #{size:=N} = network:info(NNET),
     ?END(ok).
 
-% Checks the network neurons are the indicated ----------------------
-are_network_neurons(Neurons, NNET) -> 
-    ?HEAD("Are network neurons correct?"),
-    ?INFO("Expected neurons: ", Neurons),
-    ?INFO("Network neurons: ", network:neurons(NNET)),
-    SortedNeurons = lists:sort(Neurons),
-    SortedNeurons = lists:sort(network:neurons(NNET)),
+% Checks the network nnodes are the indicated ----------------------
+are_network_nnodes(Nnodes, NNET) -> 
+    ?HEAD("Are network nnodes correct?"),
+    ?INFO("Expected nnodes: ", Nnodes),
+    ?INFO("Network nnodes: ", network:nnodes(NNET)),
+    SortedNnodes = lists:sort(Nnodes),
+    SortedNnodes = lists:sort(network:nnodes(NNET)),
     ?END(ok).
 
 % Checks the link is in the network ---------------------------------
@@ -324,12 +324,12 @@ is_in_network({_,_} = Link, NNET) ->
     [_] = [L || L <- network:links(NNET), L == Link], 
     ?END(ok);
 
-% Checks the neuron is in the network -------------------------------
-is_in_network(Neuron, NNET) -> 
-    ?HEAD("Is neuron in network?"),
-    ?INFO("Neuron: ", Neuron),
-    ?INFO("Network neurons : ", network:neurons(NNET)),
-    [_] = [N || N <- network:neurons(NNET), N == Neuron], 
+% Checks the nnode is in the network -------------------------------
+is_in_network(Nnode, NNET) -> 
+    ?HEAD("Is nnode in network?"),
+    ?INFO("Nnode: ", Nnode),
+    ?INFO("Network nnodes : ", network:nnodes(NNET)),
+    [_] = [N || N <- network:nnodes(NNET), N == Nnode], 
     ?END(ok).
 
 % Checks the link is NOT in the network -----------------------------
@@ -340,12 +340,12 @@ is_not_in_network({_,_} = Link, NNET) ->
     [] = [L || L <- network:links(NNET), L == Link], 
     ?END(ok);
 
-% Checks the neuron is NOT in the network ---------------------------
-is_not_in_network(Neuron, NNET) -> 
-    ?HEAD("Is not neuron in network?"),
-    ?INFO("Neuron: ", Neuron),
-    ?INFO("Network : ", network:neurons(NNET)),
-    [] = [N || N <- network:neurons(NNET), N == Neuron], 
+% Checks the nnode is NOT in the network ---------------------------
+is_not_in_network(Nnode, NNET) -> 
+    ?HEAD("Is not nnode in network?"),
+    ?INFO("Nnode: ", Nnode),
+    ?INFO("Network : ", network:nnodes(NNET)),
+    [] = [N || N <- network:nnodes(NNET), N == Nnode], 
     ?END(ok).
 
 

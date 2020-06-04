@@ -16,15 +16,23 @@
 -define(INFO(A,B),    ct:log(?LOW_IMPORTANCE,    "~p: ~p",   [A,B])).
 -define(ERROR(Error), ct:pal( ?HI_IMPORTANCE, "Error: ~p", [Error])).
 
--define(NETWORK_MAP, #{start => [x1, y1],
-                       x1    => [x2],
-                       y1    => [y2],
-                       x2    => ['end', y1],
-                       y2    => ['end', x1],
-                       'end' => []}).
--define(NNODE_PROPERTIES, #{activation  => direct,
-                             aggregation => direct,
-                             initializer => ones}).
+-define(TEST_MODEL, #{inputs  => #{connections => #{
+                                    layer1  => sequential,
+                                    layer2  => {sequential,0.5}}, 
+                                   units => 2, data=>#{}},
+                      layer1  => #{connections => #{
+                                    layer2  => sequential,
+                                    outputs => {sequential,0.5}}, 
+                                   units => 4, data=>#{}},
+                      layer2  => #{connections => #{
+                                    layer2  => recurrent,
+                                    outputs => sequential}, 
+                                   units => 4, data=>#{}},
+                      outputs => #{connections => #{
+                                    inputs  => {recurrent, 0.5},
+                                    layer2  => recurrent}, 
+                                   units => 2, data=>#{}}}
+).
 
 
 %%--------------------------------------------------------------------
@@ -61,7 +69,7 @@ end_per_suite(_Config) ->
 %% Reason = term()
 %%--------------------------------------------------------------------
 init_per_group(_GroupName, Config) ->
-    {atomic, Id} = nnet:new(?NETWORK_MAP, ?NNODE_PROPERTIES),
+    {atomic, Id} = nnet:from_model(?TEST_MODEL),
     [{network_id, Id} | Config].
 
 %%--------------------------------------------------------------------
@@ -107,21 +115,16 @@ end_per_testcase(_TestCase, _Config) ->
 %%--------------------------------------------------------------------
 groups() ->
     [
-        {in_sequence_nnode_edits, [sequence, shuffle],
-         [
-             correct_bias_reinitialisation,
-             correct_switch_activation
-         ]
-        },
         {in_sequence_connections_edits, [sequence, shuffle],
          [
-            %  correct_connect_all,
-             correct_connect_allowed,
-             correct_disconnect_all,
+             correct_connect_auto,
+            %  correct_connect_seq,
+            %  correct_connect_rcc,
+             correct_disconnect,
              correct_disconnect_allowed,
-            %  correct_move_all,
+            %  correct_move,
             %  correct_move_allowed,
-             correct_delete_of_weights
+             correct_reset_of_weights
          ]
         },
         {in_sequence_network_edits, [sequence, shuffle],
@@ -132,15 +135,15 @@ groups() ->
          ]
         },
         {in_parallel_edits, [parallel, shuffle],
-         [correct_bias_reinitialisation     || _ <- lists:seq(1,5)] ++ 
-         [correct_switch_activation         || _ <- lists:seq(1,5)] ++
-         %  [correct_connect_all               || _ <- lists:seq(1,5)] ++        
-         [correct_connect_allowed           || _ <- lists:seq(1,5)] ++
-         [correct_disconnect_all            || _ <- lists:seq(1,5)] ++
+         [correct_nnode_edit                || _ <- lists:seq(1,5)] ++ 
+         [correct_connect_auto              || _ <- lists:seq(1,5)] ++ 
+        %  [correct_connect_seq               || _ <- lists:seq(1,5)] ++        
+        %  [correct_connect_rcc               || _ <- lists:seq(1,5)] ++
+         [correct_disconnect                || _ <- lists:seq(1,5)] ++
          [correct_disconnect_allowed        || _ <- lists:seq(1,5)] ++
         %  [correct_move_all                  || _ <- lists:seq(1,5)] ++
         %  [correct_move_allowed              || _ <- lists:seq(1,5)] ++
-         [correct_delete_of_weights         || _ <- lists:seq(1,5)] ++
+         [correct_reset_of_weights         || _ <- lists:seq(1,5)] ++
          [correct_nnode_copy               || _ <- lists:seq(1,5)] ++
          [correct_nnode_clone              || _ <- lists:seq(1,5)] ++
          [correct_nnode_double             || _ <- lists:seq(1,5)] ++
@@ -157,11 +160,12 @@ groups() ->
 %%--------------------------------------------------------------------
 all() ->
     [ 
-        {group, in_sequence_nnode_edits},
         {group, in_sequence_connections_edits},
-        {group, in_sequence_network_edits}
+        {group, in_sequence_network_edits},
         % {group, in_parallel_edits}
+        correct_nnode_edit
     ].
+
 
 %%--------------------------------------------------------------------
 %% Function: TestCase() -> Info
@@ -185,46 +189,32 @@ my_test_case_example(_Config) ->
 % TESTS --------------------------------------------------------------
 
 % -------------------------------------------------------------------
-correct_bias_reinitialisation(Config) ->
-    ?HEAD("Correct bias reinitialisation ........................."),
+correct_nnode_edit(Config) ->
+    ?HEAD("Correct nnode edit ...................................."),
     Test = 
         fun(NNET_0) -> 
-            Nnode = random_nnode(NNET_0),
-            nnode:edit(Nnode, #{bias=>1.0}),
-            ok = is_bias_initialised(Nnode),
-            ?INFO("reinitialising bias for nnode: ", Nnode),
-            NNET_1 = nnet:reinitialise_bias([Nnode], NNET_0),
-            ok = is_bias_not_initialised(Nnode),
+            NNode = random_nnode(NNET_0),
+            nnode:edit(NNode, #{bias=>1.0}),
+            ok = is_bias_initialised(NNode),
+            ?INFO("reinitialising bias for nnode: ", NNode),
+            NNET_1 = nnet:edit_nnode([NNode], NNET_0, #{bias=>undefined}),
+            ok = is_bias_not_initialised(NNode),
             NNET_1
         end,
     {atomic, Result} = nnet:edit(?config(network_id, Config), Test),
     ?END(Result).
 
 % -------------------------------------------------------------------
-correct_switch_activation(Config) ->
-    ?HEAD("Correct activation switch ............................."),
-    Test = 
-        fun(NNET_0) -> 
-            Nnode = random_nnode(NNET_0),
-            nnode:edit(Nnode, #{activation=>direct}),
-            ok = is_activation(direct, Nnode),
-            ?INFO("Switching activation to: ", {Nnode, elu}),
-            NNET_1 = nnet:switch_activation([Nnode], NNET_0, elu),
-            ok = is_activation(elu, Nnode),
-            NNET_1
-        end,
-    {atomic, Result} = nnet:edit(?config(network_id, Config), Test),
-    ?END(Result).
-
-% -------------------------------------------------------------------
-correct_connect_allowed(Config) -> 
-    ?HEAD("Correct connection of nnodes when allowed ............"),
+correct_connect_auto(Config) -> 
+    ?HEAD("Correct connection of allowed link type ..............."),
     Test = 
         fun(NNET_0) -> 
             Links = [{F,T} || F<-random_nnodes(NNET_0), T<-random_nnodes(NNET_0)],
-            ?INFO("Connecting allowed links of: ", Links),
-            NNET_1 = nnet:connect_allowed(Links, NNET_0),
+            ?INFO("Connecting links as auto of: ", Links),
+            NNET_1 = nnet:connect(Links, NNET_0),
             Expected_links = Links,
+            % Expected_rcc = tbd,
+            % Expected_seq = tbd,
             [ok = network_SUITE:is_in_network(X, NNET_1) || X <- Expected_links],
             NNET_1
         end,
@@ -232,13 +222,13 @@ correct_connect_allowed(Config) ->
     ?END(Result).
 
 % -------------------------------------------------------------------
-correct_disconnect_all(Config) -> 
-    ?HEAD("Correct disconnection of allowed without error ........"),
+correct_disconnect(Config) -> 
+    ?HEAD("Correct disconnection without error ..................."),
     Test = 
         fun(NNET_0) -> 
             Links = [{F,T} || F<-random_nnodes(NNET_0), T<-random_nnodes(NNET_0)],
             ?INFO("Disconnecting all: ", Links),
-            NNET_1 = nnet:disconnect_all(Links, NNET_0),
+            NNET_1 = nnet:disconnect(Links, NNET_0),
             [ok = network_SUITE:is_not_in_network(X, NNET_1) || X <- Links],
             NNET_1
         end,
@@ -262,15 +252,15 @@ correct_disconnect_allowed(Config) ->
     ?END(Result).
 
 % -------------------------------------------------------------------
-correct_delete_of_weights(Config) ->
-    ?HEAD("Correct delete of weights ............................."),
+correct_reset_of_weights(Config) ->
+    ?HEAD("Correct reset of weights .............................."),
     Test = 
         fun(NNET_0) -> 
             Links = [{F,T} || F<-random_nnodes(NNET_0), T<-random_nnodes(NNET_0)],
             [link:write(Link, 1.0) || Link <- Links],
             [ok = is_link_initialised(Link) || Link <- Links],
             ?INFO("Deleting links values: ", Links),
-            NNET_1 = nnet:delete_weights(Links, NNET_0),
+            NNET_1 = nnet:reset_weights(Links, NNET_0),
             [ok = is_link_weight(undefined, Link) || Link <- Links],
             NNET_1
         end,
@@ -282,10 +272,10 @@ correct_nnode_copy(Config) ->
     ?HEAD("Correct nnode copy ..................................."),
     Test = 
         fun(NNET_0) -> 
-            Nnodes = random_nnodes(NNET_0),
-            ?INFO("Copying the nnodes: ", Nnodes),
-            NNET_1 = nnet:copy(Nnodes, NNET_0),
-            ok = has_network_increased(length(Nnodes), NNET_1, NNET_0), 
+            NNodes = random_nnodes(NNET_0),
+            ?INFO("Copying the nnodes: ", NNodes),
+            NNET_1 = nnet:copy(NNodes, NNET_0),
+            ok = has_network_increased(length(NNodes), NNET_1, NNET_0), 
             Copies = network:nnodes(NNET_1) -- network:nnodes(NNET_0),
             ?INFO("New from copy nnodes: ", Copies),
             [ok = is_link_weight(undefined, L) || N <- Copies, L <- network:links(N,NNET_1)],
@@ -299,11 +289,11 @@ correct_nnode_clone(Config) ->
     ?HEAD("Correct nnode clone .................................."),
     Test = 
         fun(NNET_0) -> 
-            Nnodes = random_nnodes(NNET_0),
-            [link:write(L,-1.0) || N <- Nnodes, L <- network:links(N,NNET_0)],
-            ?INFO("Cloning the nnodes: ", Nnodes),
-            NNET_1 = nnet:clone(Nnodes, NNET_0),
-            ok = has_network_increased(length(Nnodes), NNET_1, NNET_0), 
+            NNodes = random_nnodes(NNET_0),
+            [link:write(L,-1.0) || N <- NNodes, L <- network:links(N,NNET_0)],
+            ?INFO("Cloning the nnodes: ", NNodes),
+            NNET_1 = nnet:clone(NNodes, NNET_0),
+            ok = has_network_increased(length(NNodes), NNET_1, NNET_0), 
             Clones = network:nnodes(NNET_1) -- network:nnodes(NNET_0),
             ?INFO("New from clone nnodes: ", Clones),
             [ok = is_link_weight(-1.0, L) || N <- Clones, L <- network:links(N,NNET_1)],
@@ -317,11 +307,11 @@ correct_nnode_double(Config) ->
     ?HEAD("Correct nnode double ................................."),
     Test = 
         fun(NNET_0) -> 
-            Nnodes = random_nnodes(NNET_0),
-            [link:write(L,2.0) || N <- Nnodes, L <- network:links(N,NNET_0)],
-            ?INFO("Doubling the nnodes: ", Nnodes),
-            NNET_1 = nnet:double(Nnodes, NNET_0),
-            ok = has_network_increased(length(Nnodes), NNET_1, NNET_0), 
+            NNodes = random_nnodes(NNET_0),
+            [link:write(L,2.0) || N <- NNodes, L <- network:links(N,NNET_0)],
+            ?INFO("Doubling the nnodes: ", NNodes),
+            NNET_1 = nnet:double(NNodes, NNET_0),
+            ok = has_network_increased(length(NNodes), NNET_1, NNET_0), 
             Doubled = network:nnodes(NNET_1) -- network:nnodes(NNET_0),
             ?INFO("New from doubled nnodes: ", Doubled),
             [ok = is_link_weight(2.0,L) || N      <- Doubled, 
@@ -330,12 +320,12 @@ correct_nnode_double(Config) ->
             [ok = is_link_weight(1.0,L) || N      <- Doubled, 
                                           {_,T}=L <- network:links(N,NNET_1), 
                                           not lists:member(T,Doubled)], 
-            [ok = is_link_weight(2.0,L) || N      <- Nnodes, 
+            [ok = is_link_weight(2.0,L) || N      <- NNodes, 
                                           {_,T}=L <- network:links(N,NNET_1), 
-                                          lists:member(T,Nnodes)],
-            [ok = is_link_weight(1.0,L) || N      <- Nnodes, 
+                                          lists:member(T,NNodes)],
+            [ok = is_link_weight(1.0,L) || N      <- NNodes, 
                                           {_,T}=L <- network:links(N,NNET_1), 
-                                          not lists:member(T,Nnodes)], 
+                                          not lists:member(T,NNodes)], 
             NNET_1
         end,
     {atomic, Result} = nnet:edit(?config(network_id, Config), Test),
@@ -346,36 +336,36 @@ correct_nnode_double(Config) ->
 % INDIVIDUAL TEST FUNCTIONS ------------------------------------------
 
 % Checks the value of the bias is NOT undefined ---------------------
-is_bias_initialised(Nnode) -> 
+is_bias_initialised(NNode) -> 
     ?HEAD("Is bias initialised?"),
-    #{bias:=Bias} = nnode:read(Nnode),
+    #{bias:=Bias} = nnode:read(NNode),
     ?INFO("Bias: ", Bias),
     true = is_float(Bias),
     ?END(ok).
 
 % Checks the value of the bias is undefined -------------------------
-is_bias_not_initialised(Nnode) -> 
+is_bias_not_initialised(NNode) -> 
     ?HEAD("Is bias initialised?"),
-    #{bias:=Bias} = nnode:read(Nnode),
+    #{bias:=Bias} = nnode:read(NNode),
     ?INFO("Bias: ", Bias),
     undefined = Bias,
     ?END(ok).
 
 % Checks the activation matches with the nnode activation ----------
-is_activation(Activation, Nnode) -> 
+is_activation(Activation, NNode) -> 
     ?HEAD("Is nnode activation correct?"),
-    #{activation:=Func} = nnode:read(Nnode),
+    #{activation:=Func} = nnode:read(NNode),
     ?INFO("{activation:, expected:} ", {Activation, Func}),
     Func = Activation,
     ?END(ok).
 
 % Checks that the network is on the first path between From->To -----
-is_in_path({From,To}, NNET, Nnode) -> 
+is_in_path({From,To}, NNET, NNode) -> 
     ?HEAD("Is nnode member of the path?"),
     Path = network:seq_path({From,To}, NNET),
-    ?INFO("Nnode: ", Nnode),
+    ?INFO("NNode: ", NNode),
     ?INFO("Path: ", Path),
-    true = lists:member(Nnode, Path),
+    true = lists:member(NNode, Path),
     ?END(ok). 
 
 % Checks that the network is on the first path between From->To -----
@@ -438,10 +428,10 @@ random_nnode(NNET) ->
 
 % Return random nnodes from the network ----------------------------
 random_nnodes(NNET) -> 
-    Nnodes = network:nnodes(NNET),
-    case ltools:rand(Nnodes, 0.75) of 
+    NNodes = network:nnodes(NNET),
+    case ltools:rand(NNodes, 0.75) of 
         []       -> random_nnodes(NNET); % Try again
-        Nnodes  -> random_nnodes(NNET); % Try again
+        NNodes  -> random_nnodes(NNET); % Try again
         RandList -> RandList              % Ok
     end.
 

@@ -10,14 +10,10 @@
 
 %% API
 -export([]).
--export_type([id/0, properties/0]).
+-export_type([id/0, data/0]).
 
--type id() ::   {nnode, reference()}.
--type weight() :: number() | undefined.
--type properties() :: #{activation  := atom(),
-                        aggregation := atom(),
-                        initializer := atom(),
-                        bias        := weight()}.
+-type id()   :: {nnode, reference()}.
+-type data() :: #{}.
 
 
 %%%===================================================================
@@ -29,16 +25,10 @@
 %% Should run inside a mnesia transaction
 %% @end
 %%--------------------------------------------------------------------
--spec new(properties()) -> id().
-new(Properties) ->
-    Key  = make_ref(),
-    Data = #{
-        activation  => maps:get( activation, Properties,    direct),
-        aggregation => maps:get(aggregation, Properties,  dot_prod),
-        initializer => maps:get(initializer, Properties,    glorot),
-        bias        => maps:get(initializer, Properties, undefined)
-    },
-    ok = mnesia:write({nnode, Key, Data}),
+-spec new(Data::data()) -> Id::id().
+new(#{} = Data) ->
+    Key = make_ref(),
+    ok  = mnesia:write({nnode, Key, Data}),
     {nnode, Key}.
 
 %%--------------------------------------------------------------------
@@ -46,7 +36,7 @@ new(Properties) ->
 %% Should run inside a mnesia transaction
 %% @end
 %%--------------------------------------------------------------------
--spec read(id()) -> properties().
+-spec read(Id::id()) -> Data::data().
 read({nnode, Key}) -> 
     case mnesia:read({nnode, Key}) of 
         [{nnode, Key, Data}] -> Data;
@@ -58,7 +48,7 @@ read({nnode, Key}) ->
 %% Should run inside a mnesia transaction
 %% @end
 %%--------------------------------------------------------------------
--spec copy(Nnode::id()) -> Copy::id().
+-spec copy(NNode::id()) -> Copy::id().
 copy(Id) -> new(read(Id)).
 
 %%--------------------------------------------------------------------
@@ -66,7 +56,7 @@ copy(Id) -> new(read(Id)).
 %% Should run inside a mnesia transaction
 %% @end
 %%--------------------------------------------------------------------
--spec edit(Id::id(), properties()) -> Id::id().
+-spec edit(Id::id(), NewData::data()) -> Id::id().
 edit({nnode, Key}, Prop) -> 
     case mnesia:wread({nnode, Key}) of 
         [{nnode, Key, Data}] -> 

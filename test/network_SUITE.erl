@@ -18,18 +18,18 @@
 -define(INFO(A,B),    ct:log(?LOW_IMPORTANCE,    "~p: ~p",   [A,B])).
 -define(ERROR(Error), ct:pal( ?HI_IMPORTANCE, "Error: ~p", [Error])).
 
--define(SEQ_NETWORK_MAP, #{start => [a1, b1],
-                           a1    => [a2, b2],
-                           b1    => [a2, b2],
-                           a2    => ['end'],
-                           b2    => ['end'],
-                           'end' => []}).
--define(RCC_NETWORK_MAP, #{start => [x1, y1],
-                           x1    => [x2],
-                           y1    => [y2],
-                           x2    => ['end', y1],
-                           y2    => ['end', x1],
-                           'end' => []}).
+-define(SEQ_NETWORK_MAP, #{start => #{a1=>seq, b1=>seq},
+                           a1    => #{a2=>seq, b2=>seq},
+                           b1    => #{a2=>seq, b2=>seq},
+                           a2    => #{'end'=>seq},
+                           b2    => #{'end'=>seq},
+                           'end' => #{}}).
+-define(RCC_NETWORK_MAP, #{start => #{x1=>seq, y1=>seq},
+                           x1    => #{x2=>seq},
+                           y1    => #{y2=>seq},
+                           x2    => #{'end'=>seq, y1=>rcc},
+                           y2    => #{'end'=>seq, x1=>rcc},
+                           'end' => #{}}).
 
 
 
@@ -167,7 +167,7 @@ test_no_links(_Config) ->
     ?HEAD("Correct return of the connections size ................"),
     NN0 = seq_network(),
     Expected_Size = lists:sum(
-        [length(Cn) || Cn <- maps:values(?SEQ_NETWORK_MAP)]
+        [maps:size(Cn) || Cn <- maps:values(?SEQ_NETWORK_MAP)]
     ),
     ok = are_connections_size(Expected_Size, NN0),
     ?END(ok).
@@ -177,7 +177,7 @@ test_get_links(_Config) ->
     ?HEAD("Correct collection of the network links ..............."),
     NN0 = seq_network(),
     Expected_Links = 
-        [{F,T} || {F,Cn} <- maps:to_list(?SEQ_NETWORK_MAP), T <- Cn],
+        [{F,T} || {F,Cn} <- maps:to_list(?SEQ_NETWORK_MAP), T <- maps:keys(Cn)],
     ok = are_network_links(Expected_Links, NN0),
     ?END(ok).
 
@@ -187,7 +187,7 @@ test_add_links(_Config) ->
     NN0 = seq_network(),
     Link = {a1,'end'},
     ok = is_not_in_network(Link, NN0),
-    NN1 = network:add_link(Link, NN0),
+    NN1 = network:add_link(Link, seq, NN0),
     ?INFO("Link added to network: ", Link),
     ok = is_in_network(Link, NN1),
     ?END(ok).
@@ -215,8 +215,8 @@ test_no_nnodes(_Config) ->
 test_get_nnodes(_Config) -> 
     ?HEAD("Correct collection of the network nnodes ............."),
     NN0 = seq_network(),
-    Expected_Nnodes = maps:keys(?SEQ_NETWORK_MAP) -- [start,'end'],
-    ok = are_network_nnodes(Expected_Nnodes, NN0),
+    Expected_NNodes = maps:keys(?SEQ_NETWORK_MAP) -- [start,'end'],
+    ok = are_network_nnodes(Expected_NNodes, NN0),
     ?END(ok).
 
 % -------------------------------------------------------------------
@@ -249,8 +249,8 @@ test_concat_networks(_Config) ->
     NN2 = rcc_network(),
     NN3 = network:concat(NN1, NN2),
     ?INFO("Networks concatenated: ", NN3),
-    Expected_Nnodes = network:nnodes(NN1) ++ network:nnodes(NN2),
-    ok = are_network_nnodes(Expected_Nnodes, NN3),
+    Expected_NNodes = network:nnodes(NN1) ++ network:nnodes(NN2),
+    ok = are_network_nnodes(Expected_NNodes, NN3),
     L_NN1 = [{F,T} || {F,T} <- network:links(NN1), T =/= 'end'],
     L_NN2 = [{F,T} || {F,T} <- network:links(NN2), F =/= start],
     L_New = [{F,T} || F <- network:out_nodes(NN1), T <- network:in_nodes(NN2)],
@@ -308,12 +308,12 @@ is_network_size(N, NNET) ->
     ?END(ok).
 
 % Checks the network nnodes are the indicated ----------------------
-are_network_nnodes(Nnodes, NNET) -> 
+are_network_nnodes(NNodes, NNET) -> 
     ?HEAD("Are network nnodes correct?"),
-    ?INFO("Expected nnodes: ", Nnodes),
+    ?INFO("Expected nnodes: ", NNodes),
     ?INFO("Network nnodes: ", network:nnodes(NNET)),
-    SortedNnodes = lists:sort(Nnodes),
-    SortedNnodes = lists:sort(network:nnodes(NNET)),
+    SortedNNodes = lists:sort(NNodes),
+    SortedNNodes = lists:sort(network:nnodes(NNET)),
     ?END(ok).
 
 % Checks the link is in the network ---------------------------------
@@ -325,11 +325,11 @@ is_in_network({_,_} = Link, NNET) ->
     ?END(ok);
 
 % Checks the nnode is in the network -------------------------------
-is_in_network(Nnode, NNET) -> 
+is_in_network(NNode, NNET) -> 
     ?HEAD("Is nnode in network?"),
-    ?INFO("Nnode: ", Nnode),
+    ?INFO("NNode: ", NNode),
     ?INFO("Network nnodes : ", network:nnodes(NNET)),
-    [_] = [N || N <- network:nnodes(NNET), N == Nnode], 
+    [_] = [N || N <- network:nnodes(NNET), N == NNode], 
     ?END(ok).
 
 % Checks the link is NOT in the network -----------------------------
@@ -341,11 +341,11 @@ is_not_in_network({_,_} = Link, NNET) ->
     ?END(ok);
 
 % Checks the nnode is NOT in the network ---------------------------
-is_not_in_network(Nnode, NNET) -> 
+is_not_in_network(NNode, NNET) -> 
     ?HEAD("Is not nnode in network?"),
-    ?INFO("Nnode: ", Nnode),
+    ?INFO("NNode: ", NNode),
     ?INFO("Network : ", network:nnodes(NNET)),
-    [] = [N || N <- network:nnodes(NNET), N == Nnode], 
+    [] = [N || N <- network:nnodes(NNET), N == NNode], 
     ?END(ok).
 
 

@@ -14,7 +14,8 @@
 -export([in_seq/2, out_seq/2]).
 -export([in_degree/2, in_nodes/2, out_degree/2, out_nodes/2]).
 
--export([add_link/2, del_link/2, move_link/3, seq_path/2]).
+-export([add_link/3, del_link/2, copy_link/3, move_link/3, 
+         seq_path/2]).
 -export([in_links/1, out_links/1, links/1, no_links/1]).
 -export([in_links/2, out_links/2, links/2, no_links/2]).
 
@@ -94,7 +95,7 @@ concat(NN1, NN2) ->
         inputs  = in_nodes(NN1),
         outputs = out_nodes(NN2)
     },
-    lists:foldl(fun add_link/2, NN3_aux, 
+    lists:foldl(fun(L,NN) -> add_link(L, seq, NN) end, NN3_aux, 
         [{O1,I2} || O1 <- out_nodes(NN1), I2 <- in_nodes(NN2)]
     ).
 
@@ -138,18 +139,25 @@ info(#network{} = NN) ->
 %%-------------------------------------------------------------------
 -spec to_map(network()) -> #{From::d_node() => [To::d_node()]}.
 to_map(NN) ->
-    maps:map(fun(_,CN) -> maps:keys(?OUT(CN)) end, NN#network.nodes).
+    maps:map(fun(_,CN) -> ?OUT(CN) end, NN#network.nodes).
 
 %%-------------------------------------------------------------------
 %% @doc Creates a new network from a map.  
 %% @end
 %%-------------------------------------------------------------------
--spec from_map(#{From::d_node() => [To::d_node()]}) -> network().
+-spec from_map(#{From => #{To => seq|rcc}}) -> network() when
+    From :: d_node(),
+    To   :: d_node().
 from_map(Map) -> 
     NN = lists:foldl(fun add_nnode/2, new(), maps:keys(Map)),
-    lists:foldl(fun add_link/2, NN, 
-        [{From,To} || From <- maps:keys(Map), To <- map_get(From, Map)]
-    ).
+    map_fun(Map, NN).
+
+map_fun(Map, NN) -> 
+    maps:fold(fun map_fun/3, NN, Map).
+map_fun(From, Connections, NN) -> 
+    maps:fold(map_fun(From), NN, Connections).
+map_fun(From) -> 
+    fun(To, Type, NN) -> add_link({From,To}, Type, NN) end.
 
 %%-------------------------------------------------------------------
 %% @doc Adds a nnode to the network.  
@@ -204,9 +212,9 @@ no_nnodes(NN) ->
 %% @doc Returns a list of all nnodes of the network.  
 %% @end
 %%-------------------------------------------------------------------
--spec nnodes(NN) -> Nnodes when
+-spec nnodes(NN) -> NNodes when
       NN :: network(),
-      Nnodes :: [nnode:id()].
+      NNodes :: [nnode:id()].
 nnodes(NN) ->
     maps:keys(NN#network.nodes) -- ['start', 'end'].
 
@@ -214,9 +222,9 @@ nnodes(NN) ->
 %% @doc Returns all nnodes in the network without outputs.  
 %% @end
 %%-------------------------------------------------------------------
--spec sink_nnodes(NN) -> Nnodes when
+-spec sink_nnodes(NN) -> NNodes when
       NN :: network(),
-      Nnodes :: [nnode:id()].
+      NNodes :: [nnode:id()].
 sink_nnodes(NN) ->
     Pred = fun(_,Conn) -> #{} == Conn#cn.out end,
     Sink = maps:filter(Pred, NN#network.nodes),
@@ -226,9 +234,9 @@ sink_nnodes(NN) ->
 %% @doc Returns all nnodes in the network without inputs.  
 %% @end
 %%-------------------------------------------------------------------
--spec bias_nnodes(NN) -> Nnodes when
+-spec bias_nnodes(NN) -> NNodes when
       NN :: network(),
-      Nnodes :: [nnode:id()].
+      NNodes :: [nnode:id()].
 bias_nnodes(NN) ->
     Pred = fun(_,Conn) -> #{} == Conn#cn.in end,
     Bias = maps:filter(Pred, NN#network.nodes),
@@ -238,9 +246,9 @@ bias_nnodes(NN) ->
 %% @doc Returns the nnodes connected to start. 
 %% @end
 %%-------------------------------------------------------------------
--spec in_nodes(NN) -> Nnodes when
+-spec in_nodes(NN) -> NNodes when
       NN :: network(),
-      Nnodes :: [nnode:id()].
+      NNodes :: [nnode:id()].
 in_nodes(NN) ->
     NN#network.inputs.
 
@@ -291,9 +299,9 @@ in_degree(N, NN) ->
 %% @doc Returns the nnodes connected to end. 
 %% @end
 %%-------------------------------------------------------------------
--spec out_nodes(NN) -> Nnodes when
+-spec out_nodes(NN) -> NNodes when
       NN :: network(),
-      Nnodes :: [nnode:id()].
+      NNodes :: [nnode:id()].
 out_nodes(NN) ->
     NN#network.outputs.
 
@@ -346,23 +354,21 @@ out_degree(N, NN) ->
 %% or/and end.
 %% @end
 %%------------------------------------------------------------------
--spec add_link(Link, NN1) -> NN2 when
+-spec add_link(Link, Type, NN1) -> NN2 when
     Link :: link:link(),
-    NN1 :: network(),
-    NN2 :: network().
-add_link({start, N2}, NN) ->
+    Type :: seq | rcc,
+    NN1  :: network(),
+    NN2  :: network().
+add_link({start, N2}, seq, NN) ->
     InMap = ?OUT(map_get(start, NN#network.nodes)),
     false = is_map_key(N2, InMap),
     insert_link(seq,NN#network{inputs=[N2|in_nodes(NN)]},start,N2);
-add_link({N1, 'end'}, NN) ->
+add_link({N1, 'end'}, seq, NN) ->
     OutMap = ?IN(map_get('end', NN#network.nodes)),
     false  = is_map_key(N1, OutMap),
     insert_link(seq,NN#network{outputs=[N1|out_nodes(NN)]},N1,'end');
-add_link({N1, N2}, NN) ->
-    case seq_path({N2, N1}, NN) of 
-        not_found -> insert_link(seq, NN, N1, N2);
-        _Path     -> insert_link(rcc, NN, N1, N2)
-    end.
+add_link({N1, N2}, Type, NN) ->
+    insert_link(Type, NN, N1, N2).
 
 %%-------------------------------------------------------------------
 %% @doc Deletes the link between N1 and N2. 
@@ -370,8 +376,8 @@ add_link({N1, N2}, NN) ->
 %%-------------------------------------------------------------------
 -spec del_link(Link, NN1) -> NN2 when
     Link :: link:link(),
-    NN1 :: network(),
-    NN2 :: network().
+    NN1  :: network(),
+    NN2  :: network().
 del_link({start,   N2 }, NN) -> 
     remove_link(NN#network{ inputs=lists:delete(N2, in_nodes(NN))},start,N2);
 del_link({   N1, 'end'}, NN) -> 
@@ -380,7 +386,22 @@ del_link({   N1,   N2 }, NN) ->
     remove_link(NN, N1, N2).
 
 %%-------------------------------------------------------------------
-%% @doc Deletes the link between N1 and N2. 
+%% @doc Copies a link usign a map as #{Old => New}. 
+%% @end
+%%-------------------------------------------------------------------
+-spec copy_link(Link, NN1, NMap) -> NN2 when
+    Link  :: link:link(),
+    NN1   :: network(),
+    NMap  :: #{d_node() => d_node()},
+    NN2   :: network().
+copy_link({N1, N2}, NN, NMap) -> 
+    Type = link_type({N1,N2}, NN),
+    N3 = maps:get(N1, NMap, N1),
+    N4 = maps:get(N2, NMap, N2),
+    add_link({N3,N4}, Type, NN).
+
+%%-------------------------------------------------------------------
+%% @doc Moves the link usign a map as #{Old => New}. 
 %% @end
 %%-------------------------------------------------------------------
 -spec move_link(Link, NN1, NMap) -> NN2 when
@@ -389,9 +410,7 @@ del_link({   N1,   N2 }, NN) ->
     NMap  :: #{d_node() => d_node()},
     NN2   :: network().
 move_link({N1, N2}, NN, NMap) -> 
-    N3 = maps:get(N1, NMap, N1),
-    N4 = maps:get(N2, NMap, N2),
-    add_link({N3,N4}, del_link({N1,N2}, NN)).
+    del_link({N1,N2}, copy_link({N1, N2}, NN, NMap)).
 
 %%-------------------------------------------------------------------
 %% @doc Searches for a path between N1 and N2. 
@@ -549,4 +568,9 @@ remove_out(#cn{out=Out} = ConnN1, N2) ->
 
 remove_in(#cn{in=In} = ConnN2, N1) -> 
     ConnN2#cn{in = maps:remove(N1, In)}.
+
+% Returns the link type of N1->N2 -----------------------------------
+link_type({N1,N2}, NN) -> 
+    ConnN1 = map_get(N1, NN#network.nodes),
+    map_get(N2, ?OUT(ConnN1)).
 

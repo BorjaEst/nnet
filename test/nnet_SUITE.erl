@@ -115,39 +115,40 @@ end_per_testcase(_TestCase, _Config) ->
 %%--------------------------------------------------------------------
 groups() ->
     [
-        {in_sequence_connections_edits, [sequence, shuffle],
+        {in_sequence_nnode_operations, [sequence, shuffle],
          [
-             correct_connect_auto,
+            %  correct_rnode,
+             correct_wnode,
+            %  correct_out_nnodes,
+            %  correct_out_seq_nnodes,
+            %  correct_out_rcc_nnodes,
+             correct_in_nnodes
+         ]
+        },
+        {in_sequence_link_operations, [sequence, shuffle],
+         [
+            %  correct_connect_auto,
             %  correct_connect_seq,
             %  correct_connect_rcc,
-             correct_disconnect,
-             correct_disconnect_allowed,
+            %  correct_disconnect,
             %  correct_move,
-            %  correct_move_allowed,
-             correct_reset_of_weights
+            %  correct_merge
+             correct_reset
          ]
         },
-        {in_sequence_network_edits, [sequence, shuffle],
+        {in_sequence_network_operations, [sequence, shuffle],
          [
-             correct_nnode_copy,
-             correct_nnode_clone,
-             correct_nnode_double
+            %  correct_nnode_copy,
+            %  correct_nnode_clone,
+            %  correct_nnode_divide,
+            %  correct_nnode_split,
+            %  correct_nnode_delete,
+             correct_nnode_join
          ]
         },
-        {in_parallel_edits, [parallel, shuffle],
-         [correct_nnode_edit                || _ <- lists:seq(1,5)] ++ 
-         [correct_connect_auto              || _ <- lists:seq(1,5)] ++ 
-        %  [correct_connect_seq               || _ <- lists:seq(1,5)] ++        
-        %  [correct_connect_rcc               || _ <- lists:seq(1,5)] ++
-         [correct_disconnect                || _ <- lists:seq(1,5)] ++
-         [correct_disconnect_allowed        || _ <- lists:seq(1,5)] ++
-        %  [correct_move_all                  || _ <- lists:seq(1,5)] ++
-        %  [correct_move_allowed              || _ <- lists:seq(1,5)] ++
-         [correct_reset_of_weights         || _ <- lists:seq(1,5)] ++
-         [correct_nnode_copy               || _ <- lists:seq(1,5)] ++
-         [correct_nnode_clone              || _ <- lists:seq(1,5)] ++
-         [correct_nnode_double             || _ <- lists:seq(1,5)] ++
-         []
+        {in_parallel_operations, [parallel, shuffle],
+        %  [here_goes_the_test || _ <- lists:seq(1,5)] ++
+         [my_test_case_example]
         }
     ].
 
@@ -160,10 +161,10 @@ groups() ->
 %%--------------------------------------------------------------------
 all() ->
     [ 
-        {group, in_sequence_connections_edits},
-        {group, in_sequence_network_edits},
-        % {group, in_parallel_edits}
-        correct_nnode_edit
+        {group, in_sequence_nnode_operations},
+        {group, in_sequence_link_operations},
+        {group, in_sequence_network_operations},
+        {group, in_parallel_operations}
     ].
 
 
@@ -189,217 +190,110 @@ my_test_case_example(_Config) ->
 % TESTS --------------------------------------------------------------
 
 % -------------------------------------------------------------------
-correct_nnode_edit(Config) ->
-    ?HEAD("Correct nnode edit ...................................."),
+correct_wnode(Config) ->
+    ?HEAD("Correct wnode .........................................."),
+    Network = ?config(network_id, Config),
     Test = 
-        fun(NNET_0) -> 
-            NNode = random_nnode(NNET_0),
-            nnode:edit(NNode, #{bias=>1.0}),
-            ok = is_bias_initialised(NNode),
-            ?INFO("reinitialising bias for nnode: ", NNode),
-            NNET_1 = nnet:edit_nnode([NNode], NNET_0, #{bias=>undefined}),
-            ok = is_bias_not_initialised(NNode),
-            NNET_1
+        fun() -> 
+            NNode = random_nnode(Network),
+            ?INFO("Writing bias=1.0 in nnode: ", NNode),
+            ok = nnode:edit(NNode, #{bias=>1.0}),
+            ok = is_bias(1.0, NNode),
+            ?INFO("Reinitialising bias for nnode: ", NNode),
+            ok = nnet:wnode(NNode, #{bias=>not_init}),
+            ok = is_bias(not_init, NNode)
         end,
-    {atomic, Result} = nnet:edit(?config(network_id, Config), Test),
+    {atomic, Result} = nnet:edit(Test),
     ?END(Result).
 
 % -------------------------------------------------------------------
-correct_connect_auto(Config) -> 
-    ?HEAD("Correct connection of allowed link type ..............."),
+correct_in_nnodes(Config) ->
+    ?HEAD("Correct in nnodes ....................................."),
+    Network = ?config(network_id, Config),
     Test = 
-        fun(NNET_0) -> 
-            Links = [{F,T} || F<-random_nnodes(NNET_0), T<-random_nnodes(NNET_0)],
-            ?INFO("Connecting links as auto of: ", Links),
-            NNET_1 = nnet:connect(Links, NNET_0),
-            Expected_links = Links,
-            % Expected_rcc = tbd,
-            % Expected_seq = tbd,
-            [ok = network_SUITE:is_in_network(X, NNET_1) || X <- Expected_links],
-            NNET_1
+        fun() -> 
+            NNode1 = random_nnode(Network),
+            NNode2 = random_nnode(Network),
+            ?INFO("Setting connection: rcc, 2.0 in:", {NNode1,NNode2}),
+            ok = link:add({NNode1,NNode2}, rcc, 2.0),
+            ?INFO("Getting in links from NNode2: ", NNode2),
+            In_Links = nnet:in(NNode2),
+            ok = one_in_list({NNode1,NNode2}, In_Links)
         end,
-    {atomic, Result} = nnet:edit(?config(network_id, Config), Test),
+    {atomic, Result} = nnet:edit(Test),
     ?END(Result).
 
 % -------------------------------------------------------------------
-correct_disconnect(Config) -> 
-    ?HEAD("Correct disconnection without error ..................."),
-    Test = 
-        fun(NNET_0) -> 
-            Links = [{F,T} || F<-random_nnodes(NNET_0), T<-random_nnodes(NNET_0)],
-            ?INFO("Disconnecting all: ", Links),
-            NNET_1 = nnet:disconnect(Links, NNET_0),
-            [ok = network_SUITE:is_not_in_network(X, NNET_1) || X <- Links],
-            NNET_1
-        end,
-    {atomic, Result} = nnet:edit(?config(network_id, Config), Test),
-    ?END(Result). 
-
-% -------------------------------------------------------------------
-correct_disconnect_allowed(Config) -> 
-    ?HEAD("Correct disconnection of nnodes when allowed ........."),
-    Test = 
-        fun(NNET_0) -> 
-            Links = [{F,T} || F<-random_nnodes(NNET_0), T<-random_nnodes(NNET_0)],
-            ?INFO("Disconnecting allowed links of: ", Links),
-            NNET_1 = nnet:disconnect_allowed(Links, NNET_0),
-            RemainingLinks = intersection(Links, NNET_1),
-            ?INFO("Remaining links: ", RemainingLinks),
-            [ok = is_not_erasable(L, NNET_1)|| L <- RemainingLinks],
-            NNET_1
-        end,
-    {atomic, Result} = nnet:edit(?config(network_id, Config), Test),
-    ?END(Result).
-
-% -------------------------------------------------------------------
-correct_reset_of_weights(Config) ->
+correct_reset(Config) ->
     ?HEAD("Correct reset of weights .............................."),
+    Network = ?config(network_id, Config),   
     Test = 
-        fun(NNET_0) -> 
-            Links = [{F,T} || F<-random_nnodes(NNET_0), T<-random_nnodes(NNET_0)],
-            [link:write(Link, 1.0) || Link <- Links],
-            [ok = is_link_initialised(Link) || Link <- Links],
-            ?INFO("Deleting links values: ", Links),
-            NNET_1 = nnet:reset_weights(Links, NNET_0),
-            [ok = is_link_weight(undefined, Link) || Link <- Links],
-            NNET_1
+        fun() -> 
+            Links = [{F,T} || F <- random_nnodes(Network), 
+                              T <- random_nnodes(Network)],
+            ?INFO("Setting weight=1.0 in: ", Links),
+            [ok = link:write(Link, 1.0) || Link <- Links],
+            [ok =  is_weight(Link, 1.0) || Link <- Links],
+            ?INFO("Deleting links weights: ", Links),
+             ok = nnet:reset(Links),
+            [ok = is_weight(Link, not_init) || Link <- Links],
+             ok
         end,
-    {atomic, Result} = nnet:edit(?config(network_id, Config), Test),
+    {atomic, Result} = nnet:edit(Test),
     ?END(Result).
 
 % -------------------------------------------------------------------
-correct_nnode_copy(Config) ->
-    ?HEAD("Correct nnode copy ..................................."),
+correct_nnode_join(Config) ->
+    ?HEAD("Correct join of nnodes .............................."),
+    Network = ?config(network_id, Config),
     Test = 
-        fun(NNET_0) -> 
-            NNodes = random_nnodes(NNET_0),
-            ?INFO("Copying the nnodes: ", NNodes),
-            NNET_1 = nnet:copy(NNodes, NNET_0),
-            ok = has_network_increased(length(NNodes), NNET_1, NNET_0), 
-            Copies = network:nnodes(NNET_1) -- network:nnodes(NNET_0),
-            ?INFO("New from copy nnodes: ", Copies),
-            [ok = is_link_weight(undefined, L) || N <- Copies, L <- network:links(N,NNET_1)],
-            NNET_1
+        fun() -> 
+            NNode1 = random_nnode(Network),
+            NNode2 = random_nnode(Network),
+            ?INFO("Getting in/outputs from: ", NNode1),
+            {In_N1, Out_N1} = {in_nodes(NNode1), out_nodes(NNode1)},
+            ?INFO("In/Out Nnode1: ", {In_N1, Out_N1}),
+            ?INFO("Getting in/outputs from: ", NNode2),
+            {In_N2, Out_N2} = {in_nodes(NNode2), out_nodes(NNode2)},
+            ?INFO("In/Out Nnode2: ", {In_N2, Out_N2}),
+            Network_size = network:size(Network),
+            ?INFO("Merging nodes: ", {NNode1, NNode2}),
+             ok = nnet:join({NNode1,NNode2}, Network),
+            {In_N2x, Out_N2x} = {in_nodes(NNode2), out_nodes(NNode2)},
+            ?INFO("In/Out merged Nnode2: ", {In_N2x, Out_N2x}),
+            [ok = one_in_list(N,  In_N2x) || N <-  In_N1 ++  In_N2, N=/=NNode1],
+            [ok = one_in_list(N, Out_N2x) || N <- Out_N1 ++ Out_N2, N=/=NNode1],
+            case NNode1==NNode2 of 
+                true  -> ok = is_network_size(Network, Network_size);
+                false -> ok = is_network_size(Network, Network_size-1)
+            end
         end,
-    {atomic, Result} = nnet:edit(?config(network_id, Config), Test),
-    ?END(Result).
-
-% -------------------------------------------------------------------
-correct_nnode_clone(Config) ->
-    ?HEAD("Correct nnode clone .................................."),
-    Test = 
-        fun(NNET_0) -> 
-            NNodes = random_nnodes(NNET_0),
-            [link:write(L,-1.0) || N <- NNodes, L <- network:links(N,NNET_0)],
-            ?INFO("Cloning the nnodes: ", NNodes),
-            NNET_1 = nnet:clone(NNodes, NNET_0),
-            ok = has_network_increased(length(NNodes), NNET_1, NNET_0), 
-            Clones = network:nnodes(NNET_1) -- network:nnodes(NNET_0),
-            ?INFO("New from clone nnodes: ", Clones),
-            [ok = is_link_weight(-1.0, L) || N <- Clones, L <- network:links(N,NNET_1)],
-            NNET_1
-        end,
-    {atomic, Result} = nnet:edit(?config(network_id, Config), Test),
-    ?END(Result).
-
-% -------------------------------------------------------------------
-correct_nnode_double(Config) ->
-    ?HEAD("Correct nnode double ................................."),
-    Test = 
-        fun(NNET_0) -> 
-            NNodes = random_nnodes(NNET_0),
-            [link:write(L,2.0) || N <- NNodes, L <- network:links(N,NNET_0)],
-            ?INFO("Doubling the nnodes: ", NNodes),
-            NNET_1 = nnet:double(NNodes, NNET_0),
-            ok = has_network_increased(length(NNodes), NNET_1, NNET_0), 
-            Doubled = network:nnodes(NNET_1) -- network:nnodes(NNET_0),
-            ?INFO("New from doubled nnodes: ", Doubled),
-            [ok = is_link_weight(2.0,L) || N      <- Doubled, 
-                                          {_,T}=L <- network:links(N,NNET_1), 
-                                          lists:member(T,Doubled)],
-            [ok = is_link_weight(1.0,L) || N      <- Doubled, 
-                                          {_,T}=L <- network:links(N,NNET_1), 
-                                          not lists:member(T,Doubled)], 
-            [ok = is_link_weight(2.0,L) || N      <- NNodes, 
-                                          {_,T}=L <- network:links(N,NNET_1), 
-                                          lists:member(T,NNodes)],
-            [ok = is_link_weight(1.0,L) || N      <- NNodes, 
-                                          {_,T}=L <- network:links(N,NNET_1), 
-                                          not lists:member(T,NNodes)], 
-            NNET_1
-        end,
-    {atomic, Result} = nnet:edit(?config(network_id, Config), Test),
+    {atomic, Result} = nnet:edit(Test),
     ?END(Result).
 
 
 % --------------------------------------------------------------------
 % INDIVIDUAL TEST FUNCTIONS ------------------------------------------
 
-% Checks the value of the bias is NOT undefined ---------------------
-is_bias_initialised(NNode) -> 
-    ?HEAD("Is bias initialised?"),
+% Checks the value of the bias is the expected ----------------------
+is_bias(Expected, NNode) -> 
+    ?HEAD("Is bias the expected value?"),
     #{bias:=Bias} = nnode:read(NNode),
+    ?INFO("Expected: ", Expected),
     ?INFO("Bias: ", Bias),
-    true = is_float(Bias),
+    Expected = Bias,
     ?END(ok).
 
-% Checks the value of the bias is undefined -------------------------
-is_bias_not_initialised(NNode) -> 
-    ?HEAD("Is bias initialised?"),
-    #{bias:=Bias} = nnode:read(NNode),
-    ?INFO("Bias: ", Bias),
-    undefined = Bias,
+% Checks the list contains the element once -------------------------
+one_in_list(Element, List) -> 
+    ?HEAD("Is the Element 1 time in the List?"),
+    ?INFO("Element: ", Element),
+    ?INFO("List: ", List),
+    [Element] = [X || X <- List, Element =:= X],
     ?END(ok).
 
-% Checks the activation matches with the nnode activation ----------
-is_activation(Activation, NNode) -> 
-    ?HEAD("Is nnode activation correct?"),
-    #{activation:=Func} = nnode:read(NNode),
-    ?INFO("{activation:, expected:} ", {Activation, Func}),
-    Func = Activation,
-    ?END(ok).
-
-% Checks that the network is on the first path between From->To -----
-is_in_path({From,To}, NNET, NNode) -> 
-    ?HEAD("Is nnode member of the path?"),
-    Path = network:seq_path({From,To}, NNET),
-    ?INFO("NNode: ", NNode),
-    ?INFO("Path: ", Path),
-    true = lists:member(NNode, Path),
-    ?END(ok). 
-
-% Checks that the network is on the first path between From->To -----
-is_not_erasable({From,To}, NNET_0) -> 
-    ?HEAD("Is nnode broken if link deleted?"),
-    NNET_1 = network:del_link({From,To}, NNET_0),
-    PathStartToTo = network:seq_path({start,To}, NNET_1),
-    ?INFO("Path from start->to if deleted: ",{{start,To}, PathStartToTo}),
-    PathFromToEnd = network:seq_path({From,'end'}, NNET_1),
-    ?INFO("Path from from->end if deleted: ", {{From,'end'}, PathFromToEnd}),
-    ?INFO("At least one should be: ", not_found),
-    true = (not_found==PathStartToTo) or (not_found==PathFromToEnd),
-    ?END(ok). 
-
-% Checks the links of both networks are the same --------------------
-have_the_same_links(NNET_1, NNET_2) -> 
-    ?HEAD("Does this 2 networks have the same links?"),
-    OrderedLinks1 = lists:sort(network:links(NNET_1)),
-    OrderedLinks2 = lists:sort(network:links(NNET_2)),
-    ?INFO("Links network 1: ", NNET_1),
-    ?INFO("Links network 2: ", NNET_2),
-    OrderedLinks1 = OrderedLinks2,
-    ?END(ok).  
-
-% Checks the value of the link is not undefined ---------------------
-is_link_initialised(Link) -> 
-    ?HEAD("Is the link weight defined (a float)?"),
-    Weight = link:read(Link),
-    ?INFO("{Link, weight}: ", {Link, Weight}),
-    true = is_float(Weight),
-    ?END(ok). 
-
-% Checks the link value is the specified ---------------------
-is_link_weight(Expected, Link) -> 
+% Checks the link value is the expected -----------------------------
+is_weight(Link, Expected) -> 
     ?HEAD("Is the link weight correct?"),
     Weight = link:read(Link),
     ?INFO("Link: ", Link),
@@ -408,14 +302,13 @@ is_link_weight(Expected, Link) ->
     Expected = Weight,
     ?END(ok).  
 
-% Checks the number of nnodes increased in the defined number ------
-has_network_increased(Expected, NNET_1, NNET_0) -> 
-    ?HEAD("Has the network increased in the specified value?"),
-    Size_0 = network:no_nnodes(NNET_0),
-    Size_1 = network:no_nnodes(NNET_1),
-    ?INFO("{Size before, Size after}: ", {Size_0, Size_1}),
-    ?INFO("Expected increment: ", Expected),
-    Expected = Size_1 - Size_0,
+% Checks the size of the network is the expected ------
+is_network_size(Network, Expected) -> 
+    ?HEAD("Is the network size the expected?"),
+    Size = network:size(Network),
+    ?INFO("Expected: ", Expected),
+    ?INFO("Size: ", Size),
+    Expected = Size,
     ?END(ok).
 
 
@@ -423,25 +316,34 @@ has_network_increased(Expected, NNET_1, NNET_0) ->
 % SPECIFIC HELPER FUNCTIONS ------------------------------------------
 
 % Returns a random nnode from the network --------------------------
-random_nnode(NNET) -> 
-    ltools:randnth(network:nnodes(NNET)).
+random_nnode(Network) ->
+    NNodes = [N || {N,node} <- maps:to_list(network:nnodes(Network))],
+    ltools:randnth(NNodes).
 
 % Return random nnodes from the network ----------------------------
-random_nnodes(NNET) -> 
-    NNodes = network:nnodes(NNET),
+random_nnodes(Network) -> 
+    NNodes = [N || {N,node} <- maps:to_list(network:nnodes(Network))],
     case ltools:rand(NNodes, 0.75) of 
-        []       -> random_nnodes(NNET); % Try again
-        NNodes  -> random_nnodes(NNET); % Try again
+        []       -> random_nnodes(Network); % Try again
+        NNodes   -> random_nnodes(Network); % Try again
         RandList -> RandList              % Ok
     end.
 
-% Returns the links intersenction -----------------------------------
-intersection(Links, NNET) -> 
+% Returns the links which belong to the network ---------------------
+intersection(Links, Network) -> 
     sets:to_list(
         sets:intersection(
             sets:from_list(Links), 
-            sets:from_list(network:links(NNET))
+            sets:from_list(network:links(Network))
     )).
+
+% Returns the in nodes ----------------------------------------------
+in_nodes(NNode) -> 
+    [From || {From,_} <- nnet:in(NNode)].
+
+% Returns the out nodes ---------------------------------------------
+out_nodes(NNode) -> 
+    [To || {_,To} <- nnet:out(NNode)].
 
 
 % --------------------------------------------------------------------

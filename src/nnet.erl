@@ -1,29 +1,25 @@
 %%%-------------------------------------------------------------------
 %%% @author borja
 %%% @doc
-%%%
-%%% -TODO: Check if it is better to act as well on the bias.
-%%% -TODO: Might be interesting to test in "divide_nnode" to test 
-%%%        dividing only the inputs or only the outputs.
 %%% @end
 %%%-------------------------------------------------------------------
 -module(nnet).
 
 %% API
--export([new/0, from_model/1, edit/2, clone/1, concat/1, delete/1]).
--export([start_tables/0, info/1, inputs/1, outputs/1, all_networks/0]).
-%% Transactions to run inside 'fun edit/2'
--export([edit_nnode/3]).
--export([connect/2, connect_seq/2, connect_rcc/2, disconnect/2,
-         disconnect_allowed/2, move/3, move_allowed/3, 
-         reset_weights/2]).
--export([copy/2, clone/2, double/2, split/2, delete/2, merge/2]).
--export([add_input/2, add_output/2]).
+-export([start_tables/0, info/1, all_networks/0]).
+-export([from_model/1, edit/1, clone/1, delete/1]).
+%% NNode operations (run inside 'fun edit/1') 
+-export([rnode/1, wnode/2, out/1, out_seq/1, out_rcc/1, in/1]).
+%% Connections operations (run inside 'fun edit/1')
+-export([connect/1, connect_seq/1, connect_rcc/1, disconnect/1]).
+-export([move/2, merge/2, reset/1]).
+%% Network operations
+-export([copy/2, clone/2, divide/2, split/2, delete/2, join/2]).
+-export([make_input/2, make_output/2]).
 %% Exported types
 -export_type([id/0, nnode/0, link/0, info/0, model/0]).
 
 -type id()        :: {network, reference()}.
--type network()   :: network:network().
 -type nnode()     :: nnode:id().
 -type link()      :: {From::nnode(), To::nnode()}.
 -type result(Res) :: {'atomic', Res} | {aborted, Reason::term()}.
@@ -41,20 +37,13 @@
 %%-------------------------------------------------------------------
 -spec start_tables() -> ok.
 start_tables() ->
-    true = new_table(network, network:record_fields()),
-    true = new_table(   link,     [  from_to, weight]),
-    true = new_table( nnode,     [reference,   data]),
+    true = new_table( network, network:table_configuration()       ),
+    true = new_table( link_in,    link:table_in_configuration()    ),
+    true = new_table(link_seq,    link:table_seq_configuration()   ),
+    true = new_table(link_rcc,    link:table_rcc_configuration()   ),
+    true = new_table(  weight,    link:table_weight_configuration()),
+    true = new_table(   nnode,   nnode:table_configuration()       ),
     ok.
-
-%%-------------------------------------------------------------------
-%% @doc Creates an empty new network and returns its id.
-%% @end
-%%-------------------------------------------------------------------
--spec new() -> result(Id::id()).
-new() -> 
-    NNET = network:new(),
-    ok = mnesia:dirty_write(NNET),
-    {network, network:key(NNET)}. 
 
 %%-------------------------------------------------------------------
 %% @doc Creates a new network from a model and returns its id.
@@ -64,31 +53,18 @@ new() ->
 -spec from_model(Model::model()) -> result(Id::id()).
 from_model(Model) -> 
     mnesia:transaction(
-        fun() -> 
-            NNET = model:compile(Model),
-            ok   = mnesia:write(NNET),
-            {network, network:key(NNET)}
-        end
+        fun() -> model:compile(Model) end
     ).
 
 %%-------------------------------------------------------------------
 %% @doc Performs in a transaction the operations defined inside the 
-%% passed function. This function must be of arity one where the 
-%% passed argument is the network itself (not the id) which is always 
-%% the first argument or return of the following functions.
+%% passed function.
 %% @end
 %%-------------------------------------------------------------------
--spec edit(Id, Function) -> result(ok) when
-    Id       :: id(),
+-spec edit(Function) -> result(ok) when
     Function :: function().
-edit(Id, Function) -> 
-    mnesia:transaction(
-        fun() -> 
-            [NNET_0] = mnesia:wread(Id),
-             NNET_1  = apply(Function, [NNET_0]),
-             ok      = mnesia:write(NNET_1)
-        end
-    ).
+edit(Function) -> 
+    mnesia:transaction(Function).
 
 %%-------------------------------------------------------------------
 %% @doc Clones a network.
@@ -98,42 +74,14 @@ edit(Id, Function) ->
 clone(Id) -> 
     mnesia:transaction(
         fun() -> 
-            [NN]    = mnesia:read(Id),
-            NNodes = network:nnodes(NN),
-            NMap    = map_copy(NNodes),
-            Clone = network:rename(network:copy(NN), NMap),
-            [link:copy({From,To}, NMap) || {From,To} <- network:links(NN)],
-            ok = mnesia:write(Clone),
-            {network, network:key(Clone)}
+            NNodes = network:nnodes(Id),
+            NMap   = map_clone(NNodes),
+            Clone  = network:clone(Id),
+            ok = network:rename(Clone, NMap),
+            [link:clone({From,To}, NMap) || {From,To} <- nnet:links(Id)],
+            Clone
         end
     ).
-
-%%-------------------------------------------------------------------
-%% @doc Concatenates a list of networks connecting each network 
-%% output to all inputs of the next network in the list.
-%% The merged networks are deleted in the process but not its links
-%% and nnodes, which are only moved to the new network.
-%% @end
-%%-------------------------------------------------------------------
--spec concat(Ids) -> result(Concatenated) when 
-    Ids          :: [id()],
-    Concatenated :: id().
-concat(Ids) -> 
-    mnesia:transaction(
-        fun() -> 
-            NNx  = [hd(mnesia:read(Id)) || Id <- Ids],
-            Concatenated = concat_nnet(NNx),
-            [ok = mnesia:delete(Id) || Id <- Ids],
-            ok = mnesia:write(Concatenated),
-            {network, network:key(Concatenated)}
-        end
-    ).
-
-concat_nnet([NNET_1, NNET_2 | Networks]) -> 
-    NNET_12 = network:concat(NNET_1, NNET_2),
-    concat_nnet([NNET_12 | Networks]);
-concat_nnet([NNET]) -> 
-    NNET.
 
 %%-------------------------------------------------------------------
 %% @doc Deletes a network.
@@ -143,9 +91,9 @@ concat_nnet([NNET]) ->
 delete(Id) -> 
     mnesia:transaction(
         fun() -> 
-            [NN] = mnesia:read(Id),
-            delete(NN, network:in_nodes(NN)), % Encadenates all
-            ok = mnesia:delete(Id)
+            Nodes = network:nnodes(Id),
+            ok = lists:foreach(fun(N) -> ok = delete(N,Id) end, Nodes),
+            ok = network:delete(Id)
         end
     ).
 
@@ -155,26 +103,7 @@ delete(Id) ->
 %%-------------------------------------------------------------------
 -spec info(Id::id()) -> info().
 info(Id) -> 
-    [NN] = mnesia:dirty_read(Id),
-    network:info(NN).
-
-%%-------------------------------------------------------------------
-%% @doc Returns the network inputs.
-%% @end
-%%-------------------------------------------------------------------
--spec inputs(Id::id()) -> NNodes::[nnode()].
-inputs(Id) -> 
-    [NN] = mnesia:dirty_read(Id),
-    network:in_nodes(NN).
-
-%%-------------------------------------------------------------------
-%% @doc Returns the network outputs.
-%% @end
-%%-------------------------------------------------------------------
--spec outputs(Id::id()) -> NNodes::[nnode()].
-outputs(Id) -> 
-    [NN] = mnesia:dirty_read(Id),
-    network:out_nodes(NN).
+    network:info(Id).
 
 %%-------------------------------------------------------------------
 %% @doc Returns a list with all networks.
@@ -190,17 +119,48 @@ all_networks() ->
 %%%===================================================================
 
 %%-------------------------------------------------------------------
-%% @doc Reinitialises the nnode bias.
-%% Should run inside a network edit.
+%% @doc Edits a nnode.
+%% Should run inside a nnet edit.
 %% @end
 %%-------------------------------------------------------------------
--spec edit_nnode(Ns, NNET, Data) -> NNET when 
-    NNET :: network(),
-    Ns   :: [nnode()],
+-spec wnode(NNode, Data) -> ok when 
+    NNode :: nnode(),
     Data :: #{term() => term()}.
-edit_nnode(NNodes, NNET, Data) -> 
-    [nnode:edit(N, Data) || N <- NNodes],
-    NNET.
+wnode(NNode, Data) -> 
+    nnode:edit(NNode, Data).
+
+%%-------------------------------------------------------------------
+%% @doc Reads a nnode.
+%% Should run inside a nnet edit.
+%% @end
+%%-------------------------------------------------------------------
+-spec rnode(NNode) -> Data when 
+    NNode :: nnode(),
+    Data  :: #{term() => term()}.
+rnode(NNode) -> 
+    nnode:read(NNode).
+
+%%-------------------------------------------------------------------
+%% @doc Returns the out links.
+%% Should run inside a nnet edit.
+%% @end
+%%-------------------------------------------------------------------
+-spec out(NNode::nnode()) -> Out::[{NNode::nnode(), To::nnode()}].
+out(NNode) -> lists:usort(link:seq(NNode) ++ link:rcc(NNode)).
+
+-spec out_seq(NNode::nnode()) -> Out::[{NNode::nnode(), To::nnode()}].
+out_seq(NNode) -> link:seq(NNode, seq).
+
+-spec out_rcc(NNode::nnode()) -> Out::[{NNode::nnode(), To::nnode()}].
+out_rcc(NNode) -> link:rcc(NNode, rcc).
+
+%%-------------------------------------------------------------------
+%% @doc Returns the in links.
+%% Should run inside a nnet edit.
+%% @end
+%%-------------------------------------------------------------------
+-spec in(NNode::nnode()) -> In::[{From::nnode(), NNode::nnode()}].
+in(NNode) -> link:in(NNode).
 
 
 %%%===================================================================
@@ -211,143 +171,84 @@ edit_nnode(NNodes, NNET, Data) ->
 %% @doc Adds links selecting automatically the nature.
 %% By default it implements a sequential, but creates recurrent in 
 %% case a dead lock is detected.
-%% Should run inside a network edit.
+%% Should run inside a nnet edit.
 %% @end
 %%-------------------------------------------------------------------
--spec connect(Links, NNET_0) -> NNET_1 when 
-    Links   :: [link()],
-    NNET_0  :: network(),
-    NNET_1  :: network().
-connect(Links, NNET) -> 
-    lists:foldl(fun add_allowed_link/2, NNET, Links).
+-spec connect(Links::[link()]) -> ok.
+connect(Links) -> 
+    Add_AllowedLink = fun(L) -> ok = add_allowed_link(L) end,
+    lists:foreach(Add_AllowedLink, Links).
 
-add_allowed_link({N1,N2}, NN) ->
-    case network:seq_path({N2, N1}, NN) of 
-        not_found -> network:add_link({N1,N2}, seq, NN);
-        _Path     -> network:add_link({N1,N2}, rcc, NN)
+add_allowed_link({N1,N2}) ->
+    case seq_path(N2, N1) of 
+        not_found -> ok = lik:add({N1,N2}, seq, not_init);
+        _Path     -> ok = lik:add({N1,N2}, rcc, not_init)
     end.
 
 %%-------------------------------------------------------------------
 %% @doc Adds links as sequential to the network.
 %% If not used correctly might create dead locks, use connect/2 if
-%% not sure if a link would create a dead lock.
-%% Should run inside a network edit.
+%% you are not sure if a link would create a dead lock.
+%% Should run inside a nnet edit.
 %% @end
 %%-------------------------------------------------------------------
--spec connect_seq(Links, NNET_0) -> NNET_1 when 
-    Links   :: [link()],
-    NNET_0  :: network(),
-    NNET_1  :: network().
-connect_seq(Links, NNET) -> 
-    Add_SeqLink = fun(L,NN) -> network:add_link(L, seq, NN) end,
-    lists:foldl(Add_SeqLink, NNET, Links).
+-spec connect_seq(Links::[link()]) -> ok.
+connect_seq(Links) -> 
+    Add_SeqLink = fun(L) -> ok = link:add(L, seq, not_init) end,
+    ok = lists:foreach(Add_SeqLink, Links).
 
 %%-------------------------------------------------------------------
-%% @doc Adds links as recurrent to the network.
-%% Should run inside a network edit.
+%% @doc Adds links as recurrent.
+%% Should run inside a nnet edit.
 %% @end
 %%-------------------------------------------------------------------
--spec connect_rcc(Links, NNET_0) -> NNET_1 when 
-    Links   :: [link()],
-    NNET_0  :: network(),
-    NNET_1  :: network().
-connect_rcc(Links, NNET) -> 
-    Add_RccLink = fun(L,NN) -> network:add_link(L, rcc, NN) end,
-    lists:foldl(Add_RccLink, NNET, Links).
+-spec connect_rcc(Links::[link()]) -> ok.
+connect_rcc(Links) -> 
+    Add_RccLink = fun(L) -> ok = link:add(L, rcc, not_init) end,
+    ok = lists:foreach(Add_RccLink, Links).
 
 %%-------------------------------------------------------------------
 %% @doc Removes links. If the link did not existed nothing happens.
-%% Note it might break the network, to do not break it use 
-%% disconnect_allowed/2 (Safe but slower).
-%% Should run inside a network edit.
+%% Note it might break the network.
+%% Should run inside a nnet edit.
 %% @end
 %%-------------------------------------------------------------------
--spec disconnect(Links, NNET_0) -> NNET_1 when 
-    Links   :: [link()],
-    NNET_0  :: network(),
-    NNET_1  :: network().
-disconnect(Links, NNET) -> 
-    lists:foldl(fun network:del_link/2, NNET, [link:delete(L) || L <- Links]). 
-
-%%-------------------------------------------------------------------
-%% @doc Deletes only the allowed links from all nnodes in From to 
-%% all nnodes in To. If the link did not existed nothing happens.
-%% Should run inside a network edit.
-%% @end
-%%-------------------------------------------------------------------
--spec disconnect_allowed(Links, NNET_0) -> NNET_1 when 
-    Links   :: [link()],
-    NNET_0  :: network(),
-    NNET_1  :: network().
-disconnect_allowed([{N1,N2}|Lx], NNET_0) -> 
-    NNET_1 = network:del_link({N1,N2}, NNET_0),
-    case path_from_start(N2, NNET_1) of 
-        false -> disconnect_allowed(Lx, NNET_0);
-        true  -> 
-    case path_to_end(N1, NNET_1) of
-        false -> disconnect_allowed(Lx, NNET_0);
-        true  -> 
-    link:delete({N1,N2}),
-    disconnect_allowed(Lx, NNET_1)
-    end end;
-disconnect_allowed([], NNET) -> NNET. 
+-spec disconnect(Links::[link()]) -> ok.
+disconnect(Links) -> 
+    Del_Link = fun(L) -> ok = link:del(L) end,
+    ok = lists:foreach(Del_Link, Links).
 
 %%-------------------------------------------------------------------
 %% @doc Moves the links using a map.
-%% Note it might break the network, to do not break it use 
-%% move_allowed/2 (Safe but slower).
-%% Should run inside a network edit.
+%% Note it might break the network.
+%% Should run inside a nnet edit.
 %% @end
 %%-------------------------------------------------------------------
--spec move(Links, NNET_0, #{Old => New}) -> NNET_1 when 
-    Links   :: [link()],
-    NNET_0  :: network(),
-    NNET_1  :: network(),
-    Old     :: nnode:id(),
-    New     :: nnode:id().
-move(Links, NNET, NMap) -> 
-    lists:foldl(fun network:move_link/2, NNET, [link:move(L,NMap) || L <- Links]). 
+-spec move(Links::[link()], #{Old::nnode() => New::nnode()}) -> ok.
+move(Links, NMap) -> 
+    Move_Link = fun(L) -> ok = link:move(L,NMap) end,
+    ok = lists:foreach(Move_Link, Links).
 
 %%-------------------------------------------------------------------
-%% @doc Moves only the allowed links using a map.
-%% Should run inside a network edit.
+%% @doc Merges the links using a map.
+%% Note it might break the network.
+%% Should run inside a nnet edit.
 %% @end
 %%-------------------------------------------------------------------
--spec move_allowed(Links, NNET_0, #{Old => New}) -> NNET_1 when 
-    Links   :: [link()],
-    NNET_0  :: network(),
-    NNET_1  :: network(),
-    Old     :: nnode:id(),
-    New     :: nnode:id().
-move_allowed([{N1,N2}|Lx], NNET_0, NMap) -> 
-    NNET_1 = network:del_link({N1,N2}, NNET_0),
-    case path_from_start(N2, NNET_1) of 
-        false -> move_allowed(Lx, NNET_0, NMap);
-        true  -> 
-    case path_to_end(N1, NNET_1) of
-        false -> move_allowed(Lx, NNET_0, NMap);
-        true  -> 
-    link:move({N1,N2}, NMap),
-    NNET_2 = case network:seq_path({N2,N1}, NNET_1) of 
-        not_found -> network:move_link({N1,N2}, NNET_0, NMap);
-        _Path     -> network:add_link({N1,N2}, rcc, NNET_1)
-    end,
-    move_allowed(Lx, NNET_2, NMap)
-    end end;
-move_allowed([], NNET, _) -> NNET.
+-spec merge(Links::[link()], #{Old::nnode() => New::nnode()}) -> ok.
+merge(Links, NMap) -> 
+    Merge_Link = fun(L) -> ok = link:merge(L,NMap) end,
+    ok = lists:foreach(Merge_Link, Links).
 
 %%-------------------------------------------------------------------
-%% @doc Reinitialises the weights of a nnode.
-%% Should run inside a network edit.
+%% @doc Reinitialises the weights of the input links. 
+%% Should run inside a nnet edit.
 %% @end
 %%-------------------------------------------------------------------
--spec reset_weights(Links, NNET_0) -> NNET_1 when 
-    Links   :: [link()],
-    NNET_0  :: network(),
-    NNET_1  :: network().
-reset_weights(Links, NNET) -> 
-    [link:delete(Link) || Link <- Links],
-    NNET.
+-spec reset(Links::[link()]) -> ok. 
+reset(Links) -> 
+    Reset_Link = fun(L) -> ok = link:write(L,not_init) end,
+    ok = lists:foreach(Reset_Link, Links).
 
 
 %%%===================================================================
@@ -355,150 +256,112 @@ reset_weights(Links, NNET) ->
 %%%===================================================================
 
 %%-------------------------------------------------------------------
-%% @doc Copies the nnodes, but not the link values.
-%% Should run inside a network edit.
+%% @doc Copies the nnode and connections, but not the weights.
+%% Should run inside a nnet edit.
 %% @end
 %%-------------------------------------------------------------------
--spec copy(NNodes, NNET_0) -> NNET_1 when 
-    NNodes :: [nnode()],
-    NNET_0  :: network(),
-    NNET_1  :: network().
-copy(NNodes, NNET) -> 
-    NMap = map_copy(NNodes),
-    Links = links(NNodes, NNET),
-    NNET_1 = lists:foldl(fun network:add_nnode/2, NNET, maps:values(NMap)),
-    copy_links(Links, NNET_1, NMap).
+-spec copy(NNode1::nnode(), NNet::id()) -> NNode2::nnode().
+copy(NNode1, NNet) -> 
+    #{NNode1 := NNode2} = NMap = map_clone([NNode1]),
+    Copy_link = fun(L) -> ok = link:copy(L, NMap) end,
+    lists:foreach(Copy_link, in(NNode1)++out(NNode1)),
+    network:add_nnode(NNode2, NNet),
+    NNode2.
 
 %%-------------------------------------------------------------------
-%% @doc Copies the nnodes, together with the link values.
-%% Should run inside a network edit.
+%% @doc Copies the nnode, together with the link values.
+%% Should run inside a nnet edit.
 %% @end
 %%-------------------------------------------------------------------
--spec clone(NNodes, NNET_0) -> NNET_1 when 
-    NNodes :: [nnode()],
-    NNET_0  :: network(),
-    NNET_1  :: network().
-clone(NNodes, NNET) -> 
-    NMap = map_copy(NNodes),
-    Links = links(NNodes, NNET),
-    [link:copy(L,NMap) || L <- Links],
-    NNET_1 = lists:foldl(fun network:add_nnode/2, NNET, maps:values(NMap)),
-    copy_links(Links, NNET_1, NMap).
-
+-spec clone(NNode1::nnode(), NNet::id()) -> NNode2::nnode().
+clone(NNode1, NNet) -> 
+    #{NNode1 := NNode2} = NMap = map_clone([NNode1]),
+    Clone_link = fun(L) -> ok = link:clone(L, NMap) end,
+    lists:foreach(Clone_link, in(NNode1)++out(NNode1)),
+    network:add_nnode(NNode2, NNet),
+    NNode2.
 
 %%-------------------------------------------------------------------
-%% @doc Clones the nnodes, but new and old links are redeuced 50%. 
-%% Should run inside a network edit.
+%% @doc Clones the nnode, but new and old links are redeuced 50%. 
+%% Should run inside a nnet edit.
 %% @end
 %%-------------------------------------------------------------------
--spec double(NNodes, NNET_0) -> NNET_1 when 
-    NNodes :: [nnode()],
-    NNET_0  :: network(),
-    NNET_1  :: network().
-double(NNodes, NNET) -> 
-    NMap = map_copy(NNodes),
-    Links = links(NNodes, NNET),
-    [link:divide(L,NMap) || L <- Links],
-    NNET_1 = lists:foldl(fun network:add_nnode/2, NNET, maps:values(NMap)),
-    copy_links(Links, NNET_1, NMap). 
+-spec divide(NNode1::nnode(), NNet::id()) -> NNode2::nnode().
+divide(NNode1, NNet) -> 
+    #{NNode1 := NNode2} = NMap = map_clone([NNode1]),
+    Divide_link = fun(L) -> ok = link:divide(L, NMap) end,
+    lists:foreach(Divide_link, in(NNode1)++out(NNode1)),
+    network:add_nnode(NNode2, NNet),
+    NNode2.
 
 %%-------------------------------------------------------------------
-%% @doc Copies the nnodes and distributes links (equal probability). 
-%% The original network must have at least 2 inputs and 2 outputs. 
-%% The result nnodes will have at least 1 input and 1 output.
-%% Should run inside a network edit.
+%% @doc Copies the nnode and distributes links (equal probability). 
+%% The original nnode must have at least 2 inputs and 2 outputs. 
+%% The result nnode will have at least 1 input and 1 output.
+%% Should run inside a nnet edit.
 %% @end
 %%-------------------------------------------------------------------
--spec split(NNodes, NNET_0) -> NNET_1 when 
-    NNodes :: [nnode()],
-    NNET_0  :: network(),
-    NNET_1  :: network().
-split(NNodes, NNET) -> 
-    NMap = map_copy(NNodes),
-    tbd,
-    NNET.
+-spec split(NNode1::nnode(), NNet::id()) -> NNode2::nnode().
+split(NNode1, NNet) -> 
+    #{NNode1 := NNode2} = NMap = map_clone([NNode1]),
+    In_move  = random_split( in(NNode1)),
+    Out_move = random_split(out(NNode1)),
+    move(In_move++Out_move, NMap),
+    network:add_nnode(NNode2, NNet),
+    NNode2.
 
 %%-------------------------------------------------------------------
 %% @doc Deletes a nnode together with all its connections and links.
-%% This action encadenates to all nnodes without a path to the start
-%% or end.
-%% Should run inside a network edit.
+%% Should run inside a nnet edit.
 %% @end
 %%------------------------------------------------------------------- 
--spec delete(NNodes, NNET_0) -> NNET_1 when 
-    NNodes :: [nnode()],
-    NNET_0  :: network(),
-    NNET_1  :: network().
-delete(NNET_0, [N1|Nx]) -> 
-    NNET_1 = reset_weights(NNET_0, N1),
-    NNET_2 = network:delete(N1, NNET_1),
-    NNET_3 = lists:foldl( 
-        fun(N, NNET) -> case path_to_end(N, NNET) of 
-                            false -> delete(N, NNET);
-                            true  -> NNET
-                        end
-        end, NNET_2, network:in_nodes(N1, NNET_2)),
-    NNET_4 = lists:foldl( 
-        fun(N, NNET) -> case path_from_start(N, NNET) of 
-                            false -> delete(N, NNET);
-                            true  -> NNET
-                        end
-        end, NNET_3, network:out_nodes(N1, NNET_3)),
-    delete(NNET_4, Nx) ;
-delete([], NNET) -> 
-    NNET.
+-spec delete(NNode::nnode(), NNet::id()) -> ok.
+delete(NNode, NNet) -> 
+    Delete_link = fun(L) -> ok = link:delete(L) end,
+    lists:foreach(Delete_link, in(NNode)++out(NNode)),
+    network:del_nnode(NNode, NNet),
+    nnode:delete(NNode).
 
 %%-------------------------------------------------------------------
 %% @doc Merges all inputs and outputs of all nnodes from left to 
-%% right. All nnodes except the last are so deleted.
-%% Should run inside a network edit.
+%% right. NNode1 is deleted after the operation.
+%% Should run inside a nnet edit.
 %% @end
 %%-------------------------------------------------------------------
--spec merge(NNodes, NNET_0) -> NNET_1 when 
-    NNodes :: [nnode()],
-    NNET_0  :: network(),
-    NNET_1  :: network().
-merge(NNET, [N1,N2|Nx]) -> 
-    % NMap = #{N1 => N2},
-    % Lx = [link:merge(Link, NMap) || Link <- network:links(N1, NNET)],
-    % merge(delete(connect_allowed(Lx, NNET), [N1]), [N2|Nx]);
-    tbd;
-merge(NNET, [_]) -> 
-    NNET.
+-spec join({NNode1::nnode(), NNode2::nnode()}, NNet::id()) -> ok.
+join({NNode1, NNode1},    _) -> ok;
+join({NNode1, NNode2}, NNet) -> 
+    { In_move,  In_merge} = diff_common( in(NNode1),  in(NNode2)),
+    {Out_move, Out_merge} = diff_common(out(NNode1), out(NNode2)),
+    NMap = #{NNode1 => NNode2},
+    move(In_move ++ Out_move, NMap),
+    merge(In_merge ++ Out_merge, NMap),
+    delete(NNode1, NNet).
+
+diff_common(List1, List2) ->
+    Common    = [X || X <- List1, Y <-List2, X=:=Y],
+    Different = List1 -- Common,
+    {Different, Common}.
 
 %%-------------------------------------------------------------------
-%% @doc Adds a nnode as input. Connected nnodes need to be 
-%% specified.
-%% Should run inside a network edit.
+%% @doc Makes a nnode a network input. 
+%% Should run inside a nnet edit.
 %% @end
 %%-------------------------------------------------------------------
--spec add_input(Neighbours, NNET_0) -> NNET_1 when 
-    Neighbours :: [nnode()],
-    NNET_0     :: network(),
-    NNET_1     :: network().
-add_input(Neighbours, NNET_0) ->
-    NInput = nnode:new(#{}),
-    connect_seq(
-        network:add_nnode(NInput, NNET_0),
-        [{start,NInput}|[{NInput,N2} || N2 <- Neighbours]]
-    ). 
+-spec make_input(NNode::nnode(), NNet::id()) -> ok.
+make_input(NNode, NNet) ->
+    network:add_input(NNode, NNet),
+    link:add({NNet,NNode}, seq, 1.0).
 
 %%-------------------------------------------------------------------
-%% @doc Adds a nnode as output. Connected nnodes need to be 
-%% specified.
-%% Should run inside a network edit.
+%% @doc Makes a nnode a network input. 
+%% Should run inside a nnet edit.
 %% @end
 %%-------------------------------------------------------------------
--spec add_output(Neighbours, NNET_0) -> NNET_1 when 
-    Neighbours :: [nnode()],
-    NNET_0     :: network(),
-    NNET_1     :: network().
-add_output(Neighbours, NNET_0) ->
-    NOutput = nnode:new(#{}),
-    connect_seq(
-        network:add_nnode(NOutput, NNET_0),
-        [{NOutput,'end'}|[{N1,NOutput} || N1 <- Neighbours]]
-    ). 
+-spec make_output(NNode::nnode(), NNet::id()) -> ok.
+make_output(NNode, NNet) ->
+    network:add_output(NNode, NNet),
+    link:add({NNode,NNet}, seq, 1.0). 
 
 
 %%====================================================================
@@ -506,35 +369,39 @@ add_output(Neighbours, NNET_0) ->
 %%====================================================================
 
 % Creates a new table -----------------------------------------------
-new_table(Name, Attributes) ->
-    case mnesia:create_table(Name, [{attributes, Attributes}]) of
+new_table(Name, Configuration) ->
+    case mnesia:create_table(Name, Configuration) of
         {atomic, ok} -> true;
-        {aborted, {already_exists, Name}} -> check(Name, Attributes);
+        {aborted, {already_exists, Name}} -> check(Name, Configuration);
         Other -> Other
     end.
 
 % Checks the table has the correct attributes -----------------------
--define(BAD_TABLE, "table ~s exists using invalid attributtes").
-check(Name, Attributes) ->
-    case mnesia:table_info(Name, attributes) of 
-        Attributes -> true;
-        _ -> exit(io_lib:format(?BAD_TABLE, [Name]))
-    end.
+-define(BAD_TABLE, "table ~s exists using invalid configuration ~p").
+check(Name, [{Key,Val}|Configuration]) ->
+    case mnesia:table_info(Name, Key) of 
+        Val -> check(Name, Configuration);
+        _   -> exit(io_lib:format(?BAD_TABLE, [Name, {Key,Val}]))
+    end;
+check(_Name, []) -> true.
 
 % Copies the nnodes and retruns a map #{Old=>New} ------------------
-map_copy(NNodes) -> map_copy(NNodes, #{}).
+map_clone(NNodes)       -> map_clone(NNodes, #{}).
+map_clone([N|Nx], NMap) -> map_clone(Nx, NMap#{N => nnode:clone(N)});
+map_clone(    [], NMap) -> NMap. 
 
-map_copy([N|Nx], NMap) -> map_copy(Nx, NMap#{N => nnode:copy(N)});
-map_copy(    [], NMap) -> NMap. 
+% Finds the sequential path between N1->N2 --------------------------
+seq_path(N1, N2) -> 
+    seq_path(out_seq(N1), N2, [], [N1], [N1]).
 
-% Returns a unique list of all nnodes links ------------------------
-links(NNodes, NNET) -> 
-    lists:usort([L || N <- NNodes, L <- network:links(N, NNET)]).
-
-% Copies the links in the network -----------------------------------
-copy_links(Links, NNET, NMap) -> 
-    Copy_Link = fun(L,NN) -> network:copy_link(L, NN, NMap) end,
-    lists:foldl(Copy_Link, NNET, Links). 
+seq_path([W| _], W,    _,  _, Ps) -> lists:reverse([W|Ps]);
+seq_path([N|Ns], W, Cont, Xs, Ps) ->
+    case lists:member(N, Xs) of
+	true ->  seq_path(Ns, W, Cont, Xs, Ps);
+	false -> seq_path(out_seq(N), W, [{Ns,Ps}|Cont], [N|Xs], [N|Ps])
+    end;
+seq_path([], W, [{Ns,Ps}|Cont], Xs, _) -> seq_path(Ns, W, Cont, Xs, Ps);
+seq_path([], _,             [],  _, _) -> false.
 
 % Returns a non empty/full list of random elements ------------------
 random_split([A,B]) -> 
@@ -550,30 +417,6 @@ random_split(Links) when is_list(Links) ->
     end;
 random_split(_Other) -> 
     error({badarg, "Request a list of at least 2 inputs/outputs"}).
-
-% Checks there is a path from the start -----------------------------
-path_from_start(N, NNET) -> 
-    case network:seq_path({start,N}, NNET) of
-        not_found -> false;
-        _Path     -> true 
-    end.
-
-% Checks there is a path to the end ---------------------------------
-path_to_end(N, NNET) -> 
-    case network:seq_path({N,'end'}, NNET) of
-        not_found -> false;
-        _Path     -> true 
-    end.
-
-% Function that checks for nnode defects --------------------------- 
-check_nnode(N, NNET) -> 
-    case path_from_start(N, NNET) of
-        false -> {no_path, #{start=>N}};
-        true  -> 
-    case path_to_end(N, NNET) of
-        false -> {no_path, #{N=>'end'}};
-        true  -> ok 
-    end end.
 
 
 %%====================================================================

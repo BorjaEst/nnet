@@ -178,8 +178,13 @@ copy(Link, NMap) ->
     Link :: {Old::from(), Old::to()},
     Old  :: from() | to(),
     New  :: from() | to().
-clone(Link, NMap) -> 
-    ok = add(map(Link, NMap), type(Link), read(Link)).
+clone({From,To} = Link, NMap) when is_map_key(From,NMap); 
+                                   is_map_key(  To,NMap) -> 
+    case mnesia:read({weight, Link}) of 
+        [{_,_,W}] -> add(map(Link, NMap), type(Link), W);
+         []       -> ok
+    end;
+clone(_, _) -> ok.
 
 %%-------------------------------------------------------------------
 %% @doc Moves the links using a map.
@@ -190,9 +195,15 @@ clone(Link, NMap) ->
     Link :: {Old::from(), Old::to()},
     Old  :: from() | to(),
     New  :: from() | to().
-move(Link, NMap) -> 
-    ok = clone(Link, NMap),
-    ok = del(Link).
+move({From,To} = Link, NMap) when is_map_key(From,NMap); 
+                                  is_map_key(  To,NMap) ->  
+    do_move(Link, map(Link, NMap));
+move(_, _) -> ok.
+
+do_move( Link,  Link) -> ok;
+do_move(FLink, TLink) -> 
+    ok = sumPer(FLink, TLink, 1.00),
+    ok = del(FLink).
 
 %%-------------------------------------------------------------------
 %% @doc Moves the 50% of the weights on the mapped connections. 
@@ -203,28 +214,13 @@ move(Link, NMap) ->
     Link :: {Old::from(), Old::to()},
     Old  :: from() | to(),
     New  :: from() | to().
-divide(Link, NMap) -> 
-    ok = update_with(Link, fun per50/1),
-    ok = clone(Link, NMap).
-
-per50(Value) -> Value *0.50.
-
-%%-------------------------------------------------------------------
-%% @doc Merges the links using a map.
-%% Should run inside a mnesia transaction.
-%% @end
-%%-------------------------------------------------------------------
--spec merge(Link, #{Old => New}) -> ok when 
-    Link :: {Old::from(), Old::to()},
-    Old  :: from() | to(),
-    New  :: from() | to().
-merge(Link, NMap) ->
-    update_with(map(Link, NMap), fun(X) -> lsum(X,read(Link)) end),
-    del(Link).
-
-lsum(      W1, not_init) -> W1;  
-lsum(not_init,       W2) ->    W2;  
-lsum(      W1,       W2) -> W1+W2.
+divide({From,To} = Link, NMap) when is_map_key(From,NMap); 
+                                    is_map_key(  To,NMap) ->  
+    case sumPer(Link, map(Link, NMap), 0.50) of 
+        not_defined -> ok;
+        Ri          -> write(Link, Ri)
+    end;
+divide(_, _) -> ok.
 
 
 %%====================================================================
@@ -248,6 +244,28 @@ is_in(Tab, A, B) ->
 % Maps a link from a tuple {From,To} --------------------------------
 map({From, To}, Map) ->
     {maps:get(From, Map, From), maps:get(To, Map, To)}.
+
+% Moves a percentage of weight from one link to other ---------------
+sumPer( Link,  Link, _) -> ok;
+sumPer(FLink, TLink, X) ->
+    case mnesia:wread({weight, FLink}) of 
+        []         -> Ri = not_defined;
+        [{_,_,W1}] -> {Xi,Ri} = takePer(W1,X),
+    case mnesia:wread({weight, TLink}) of 
+        []         -> ok = add(TLink, type(FLink), merge(Xi,not_init));
+        [{_,_,W2}] -> ok = write(TLink, merge(Xi,W2))
+    end end,
+    Ri.
+
+% Takes th percentage of a weight ------------------
+takePer(not_init, _) ->  {not_init, not_init};
+takePer(      W1, X) -> Xi = X*W1, {Xi,W1-Xi}.
+
+% Merges the W1 with W2 ---------------------------------------------
+merge(not_init, not_init) -> not_init;
+merge(not_init,       W2) ->       W2;
+merge(      W1, not_init) ->    W1   ;
+merge(      W1,       W2) ->    W1+W2.
 
 
 %%====================================================================

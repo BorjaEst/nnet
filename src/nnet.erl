@@ -12,7 +12,7 @@
 -export([rnode/1, wnode/2, out/1, out_seq/1, out_rcc/1, in/1]).
 %% Connections operations (run inside 'fun edit/1')
 -export([connect/1, connect_seq/1, connect_rcc/1, disconnect/1]).
--export([move/2, merge/2, reset/1]).
+-export([move/2, reset/1]).
 %% Network operations
 -export([copy/2, clone/2, divide/2, split/2, delete/2, join/2]).
 -export([make_input/2, make_output/2]).
@@ -149,10 +149,10 @@ rnode(NNode) ->
 out(NNode) -> lists:usort(link:seq(NNode) ++ link:rcc(NNode)).
 
 -spec out_seq(NNode::nnode()) -> Out::[{NNode::nnode(), To::nnode()}].
-out_seq(NNode) -> link:seq(NNode, seq).
+out_seq(NNode) -> link:seq(NNode).
 
 -spec out_rcc(NNode::nnode()) -> Out::[{NNode::nnode(), To::nnode()}].
-out_rcc(NNode) -> link:rcc(NNode, rcc).
+out_rcc(NNode) -> link:rcc(NNode).
 
 %%-------------------------------------------------------------------
 %% @doc Returns the in links.
@@ -181,8 +181,8 @@ connect(Links) ->
 
 add_allowed_link({N1,N2}) ->
     case seq_path(N2, N1) of 
-        not_found -> ok = lik:add({N1,N2}, seq, not_init);
-        _Path     -> ok = lik:add({N1,N2}, rcc, not_init)
+        not_found -> ok = link:add({N1,N2}, seq, not_init);
+        _Path     -> ok = link:add({N1,N2}, rcc, not_init)
     end.
 
 %%-------------------------------------------------------------------
@@ -219,7 +219,7 @@ disconnect(Links) ->
     ok = lists:foreach(Del_Link, Links).
 
 %%-------------------------------------------------------------------
-%% @doc Moves the links using a map.
+%% @doc Moves the links using a map (Weights are merged).
 %% Note it might break the network.
 %% Should run inside a nnet edit.
 %% @end
@@ -229,16 +229,6 @@ move(Links, NMap) ->
     Move_Link = fun(L) -> ok = link:move(L,NMap) end,
     ok = lists:foreach(Move_Link, Links).
 
-%%-------------------------------------------------------------------
-%% @doc Merges the links using a map.
-%% Note it might break the network.
-%% Should run inside a nnet edit.
-%% @end
-%%-------------------------------------------------------------------
--spec merge(Links::[link()], #{Old::nnode() => New::nnode()}) -> ok.
-merge(Links, NMap) -> 
-    Merge_Link = fun(L) -> ok = link:merge(L,NMap) end,
-    ok = lists:foreach(Merge_Link, Links).
 
 %%-------------------------------------------------------------------
 %% @doc Reinitialises the weights of the input links. 
@@ -331,17 +321,8 @@ delete(NNode, NNet) ->
 -spec join({NNode1::nnode(), NNode2::nnode()}, NNet::id()) -> ok.
 join({NNode1, NNode1},    _) -> ok;
 join({NNode1, NNode2}, NNet) -> 
-    { In_move,  In_merge} = diff_common( in(NNode1),  in(NNode2)),
-    {Out_move, Out_merge} = diff_common(out(NNode1), out(NNode2)),
-    NMap = #{NNode1 => NNode2},
-    move(In_move ++ Out_move, NMap),
-    merge(In_merge ++ Out_merge, NMap),
+    move(in(NNode1) ++ out(NNode1), #{NNode1 => NNode2}),
     delete(NNode1, NNet).
-
-diff_common(List1, List2) ->
-    Common    = [X || X <- List1, Y <-List2, X=:=Y],
-    Different = List1 -- Common,
-    {Different, Common}.
 
 %%-------------------------------------------------------------------
 %% @doc Makes a nnode a network input. 

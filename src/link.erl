@@ -83,20 +83,7 @@ del({From, To} = Link) ->
 read(Link) -> 
     case mnesia:read({weight, Link}) of 
         [{_,_,W}] -> W;
-         []       -> error({{link, Link}, not_defined})
-    end.
-
-%%-------------------------------------------------------------------
-%% @doc Returns the link weight.
-%% @end
-%%-------------------------------------------------------------------
--spec dirty_read(Link) -> Weight when 
-    Link   :: {from(), to()},
-    Weight :: weight().
-dirty_read(Link) ->  
-    case mnesia:dirty_read({weight, Link}) of 
-        [{_,_,W}] -> W;
-         []       -> error({{link, Link}, not_defined})
+         []       -> error({not_defined, {link, Link}})
     end.
 
 %%-------------------------------------------------------------------
@@ -104,35 +91,27 @@ dirty_read(Link) ->
 %% Should run inside a mnesia transaction.
 %% @end
 %%------------------------------------------------------------------
--spec write(Link, Weight) -> ok when
+-spec write(Link, Weight) -> ok | {error, Reason} when 
     Link   :: {from(), to()},
-    Weight :: weight().
+    Weight :: weight(),
+    Reason :: {not_defined, {link, Link}}.
 write(Link, Weight) -> 
-    ok = mnesia:write({weight, Link, Weight}).
-
-%%-------------------------------------------------------------------
-%% @doc Writes the indicated link weight in mnesia.
-%% Should run inside a mnesia transaction.
-%% @end
-%%------------------------------------------------------------------
--spec dirty_write(Link, Weight) -> ok when
-    Link   :: {from(), to()},
-    Weight :: weight().
-dirty_write(Link, Weight) -> 
-    ok = mnesia:dirty_write({weight, Link, Weight}).
+    Write = fun(_) -> Weight end, 
+    update_with(Write, Link).
 
 %%-------------------------------------------------------------------
 %% @doc Updates a specific weight using a function.
 %% Should run inside a mnesia transaction.
 %% @end
 %%------------------------------------------------------------------
--spec update_with(Link, Fun) -> ok when
+-spec update_with(Fun, Link) -> ok | {error, Reason} when 
     Link :: {from(), to()},
-    Fun  :: weight().
-update_with(Link, Fun) -> 
+    Fun  :: function(),
+    Reason :: {not_defined, {link, Link}}.
+update_with(Fun, Link) -> 
     case mnesia:wread({weight, Link}) of 
-        [{_,_,W}] -> write(Link, Fun(W));
-         []       -> error({{link, Link}, not_defined})
+        [{_,_,W}] -> ok = mnesia:write({weight, Link, Fun(W)});
+         []       -> {error, {not_defined, {link, Link}}}
     end.
 
 %%-------------------------------------------------------------------
@@ -162,110 +141,132 @@ in(To) ->
 %% Should run inside a mnesia transaction.
 %% @end
 %%-------------------------------------------------------------------
--spec copy(Link, #{Old => New}) -> ok when 
+-spec copy(Link, #{Old => New}) -> ok | {error, Reason} when 
     Link :: {Old::from(), Old::to()},
     Old  :: from() | to(),
-    New  :: from() | to().
+    New  :: from() | to(),
+    Reason :: {not_defined, {link, Link}}.
 copy(Link, NMap) -> 
-    ok = add(map(Link, NMap), type(Link), not_init).
+    do_copy(Link, map(Link, NMap)).
+
+do_copy( Link,  Link) -> ok;
+do_copy(FLink, TLink) -> 
+    case type(FLink) of 
+        seq -> ok = add(TLink, seq, not_init);
+        rcc -> ok = add(TLink, rcc, not_init);
+        undefined -> {error, {not_defined, {link, FLink}}}
+    end.
 
 %%-------------------------------------------------------------------
 %% @doc Copies a link and weight replacing the From and To as copy. 
 %% Should run inside a mnesia transaction.
 %% @end
 %%-------------------------------------------------------------------
--spec clone(Link, #{Old => New}) -> ok when 
+-spec clone(Link, #{Old => New}) -> ok | {error, Reason} when 
     Link :: {Old::from(), Old::to()},
     Old  :: from() | to(),
-    New  :: from() | to().
-clone({From,To} = Link, NMap) when is_map_key(From,NMap); 
-                                   is_map_key(  To,NMap) -> 
-    case mnesia:read({weight, Link}) of 
-        [{_,_,W}] -> add(map(Link, NMap), type(Link), W);
-         []       -> ok
-    end;
-clone(_, _) -> ok.
+    New  :: from() | to(),
+    Reason :: {not_defined, {link, Link}}.
+clone(Link, NMap) ->
+    do_clone(Link, map(Link, NMap)).
+
+do_clone( Link,  Link) -> ok;
+do_clone(FLink, TLink) -> 
+    case type(FLink) of 
+        seq -> ok = add(TLink, seq, read(FLink));
+        rcc -> ok = add(TLink, rcc, read(FLink));
+        undefined -> {error, {not_defined, {link, FLink}}}
+    end.
 
 %%-------------------------------------------------------------------
 %% @doc Moves the links using a map.
 %% Should run inside a mnesia transaction.
 %% @end
 %%-------------------------------------------------------------------
--spec move(Link, #{Old => New}) -> ok when 
+-spec move(Link, #{Old => New}) -> ok | {error, Reason} when 
     Link :: {Old::from(), Old::to()},
     Old  :: from() | to(),
-    New  :: from() | to().
-move({From,To} = Link, NMap) when is_map_key(From,NMap); 
-                                  is_map_key(  To,NMap) ->  
-    do_move(Link, map(Link, NMap));
-move(_, _) -> ok.
+    New  :: from() | to(),
+    Reason :: {not_defined, {link, Link}}.
+move(Link, NMap) ->  
+    do_move(Link, map(Link, NMap)).
 
 do_move( Link,  Link) -> ok;
 do_move(FLink, TLink) -> 
-    ok = sumPer(FLink, TLink, 1.00),
-    ok = del(FLink).
+    case type(FLink) of 
+        Type when Type==seq; Type==rcc -> 
+            ok = merge(TLink, Type, read(FLink)), 
+            ok = del(FLink);
+        undefined -> 
+            {error, {not_defined, {link, FLink}}}
+    end.
 
 %%-------------------------------------------------------------------
 %% @doc Moves the 50% of the weights on the mapped connections. 
 %% Should run inside a mnesia transaction.
 %% @end
 %%-------------------------------------------------------------------
--spec divide(Link, #{Old => New}) -> ok when 
+-spec divide(Link, #{Old => New}) -> ok | {error, Reason} when 
     Link :: {Old::from(), Old::to()},
     Old  :: from() | to(),
-    New  :: from() | to().
-divide({From,To} = Link, NMap) when is_map_key(From,NMap); 
-                                    is_map_key(  To,NMap) ->  
-    case sumPer(Link, map(Link, NMap), 0.50) of 
-        not_defined -> ok;
-        Ri          -> write(Link, Ri)
-    end;
-divide(_, _) -> ok.
+    New  :: from() | to(),
+    Reason :: {not_defined, {link, Link}}.
+divide(Link, NMap) ->  
+    do_divide(Link, map(Link, NMap)).
+
+do_divide( Link,  Link) -> ok;
+do_divide(FLink, TLink) -> 
+    case type(FLink) of 
+        Type when Type==seq; Type==rcc -> 
+            {Xi, Ri} = takePer(read(FLink), 0.50),
+            ok = merge(TLink, Type,  Xi), 
+            ok = mnesia:write({weight, FLink, Ri});
+        undefined -> 
+            {error, {not_defined, {link, FLink}}}
+    end.
 
 
 %%====================================================================
 %% Internal functions
 %%====================================================================
 
-% Returns the nature value from the list of out links ---------------
-type({From, To} = Link) -> 
-    case is_in(link_seq, From, To) of 
-        true  -> seq;
-        false -> 
-    case is_in(link_rcc, From, To) of 
-        true  -> rcc;
-        false -> error({{link, Link}, not_defined})
-    end end.
+% Maps a link from a tuple {From,To} --------------------------------
+map({From, To}, Map) ->
+    {maps:get(From, Map, From), maps:get(To, Map, To)}.
 
 % Returns if {Tab,A,B} is in links table ----------------------------
 is_in(Tab, A, B) -> 
     lists:any(fun({_,_,X}) -> X=:=B end, mnesia:read({Tab, A})).
 
-% Maps a link from a tuple {From,To} --------------------------------
-map({From, To}, Map) ->
-    {maps:get(From, Map, From), maps:get(To, Map, To)}.
+% Returns the nature value from the list of out links ---------------
+type({From, To}) -> 
+    case is_in(link_seq, From, To) of 
+        true  -> seq;
+        false -> 
+    case is_in(link_rcc, From, To) of 
+        true  -> rcc;
+        false -> undefined
+    end end.
 
-% Moves a percentage of weight from one link to other ---------------
-sumPer( Link,  Link, _) -> ok;
-sumPer(FLink, TLink, X) ->
-    case mnesia:wread({weight, FLink}) of 
-        []         -> Ri = not_defined;
-        [{_,_,W1}] -> {Xi,Ri} = takePer(W1,X),
-    case mnesia:wread({weight, TLink}) of 
-        []         -> ok = add(TLink, type(FLink), merge(Xi,not_init));
-        [{_,_,W2}] -> ok = write(TLink, merge(Xi,W2))
-    end end,
-    Ri.
+% Merges the Link with W1 -------------------------------------------
+merge({From, To} = Link, Type, W1) -> 
+    case Type of 
+        seq -> ok = mnesia:write({link_seq, From, To});
+        rcc -> ok = mnesia:write({link_rcc, From, To})
+    end,
+    case mnesia:wread({weight, Link}) of 
+        [{_,_,W2}] -> ok = mnesia:write({weight, Link, merge(W1,W2)});
+        []         -> ok = mnesia:write({weight, Link, W1}),
+                      ok = mnesia:write({link_in, To, From})
+    end.
+
+merge(not_init, W2) -> W2;
+merge(W1, not_init) -> W1;
+merge(W1, W2)       -> W1+W2.
 
 % Takes th percentage of a weight ------------------
 takePer(not_init, _) ->  {not_init, not_init};
 takePer(      W1, X) -> Xi = X*W1, {Xi,W1-Xi}.
-
-% Merges the W1 with W2 ---------------------------------------------
-merge(not_init, not_init) -> not_init;
-merge(not_init,       W2) ->       W2;
-merge(      W1, not_init) ->    W1   ;
-merge(      W1,       W2) ->    W1+W2.
 
 
 %%====================================================================

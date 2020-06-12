@@ -34,9 +34,9 @@
 compile(#{inputs:=_, outputs:=_} = Model) -> 
     Layers = compile_layers(Model),
     NNet   = compile_network(Layers),
-     ok = connect_nnodes(Layers),
-    [ok = nnet:make_input(L,NNet)  || L <- nnodes( inputs, Layers)],
-    [ok = nnet:make_output(L,NNet) || L <- nnodes(outputs, Layers)],
+    ok = connect_nnodes(Layers),
+    ok = connect_inputs( Layers, NNet) ,
+    ok = connect_outputs(Layers, NNet),
     NNet.
 
 % Adds the nodes to the nnode specs ---------------------------------
@@ -48,6 +48,19 @@ compile(_Layer, #{units:=N, data:=Data} = Definition) ->
 % Implements the neural network frm model ---------------------------
 compile_network(Layers) -> 
     lists:foldl(fun add_nnodes/2, network:new(), maps:values(Layers)).
+
+% Implements the layers connections ---------------------------------
+connect_nnodes(Layers) ->
+    Fun = fun(L) -> connect_nnodes(L, Layers) end,
+    ok = lists:foreach(Fun, maps:keys(Layers)).
+
+% Implements the network inputs connections -------------------------
+connect_inputs(Layers, NNet) ->
+    ok = nnet:connect_seq([{NNet,N} || N <- nnodes( inputs, Layers)]).
+
+% Implements the network outputs connections ------------------------
+connect_outputs(Layers, NNet) ->
+    ok = nnet:connect_seq([{N,NNet} || N <- nnodes(outputs, Layers)]).
 
 
 %%====================================================================
@@ -63,10 +76,7 @@ nnodes(Layer, Layers) ->
     #{Layer:=#{nnodes:=NNodes}} = Layers,
     NNodes.
 
-% Implements the layers connections ---------------------------------
-connect_nnodes(Layers) ->
-    Fun = fun(L) -> connect_nnodes(L, Layers) end,
-    ok = lists:foreach(Fun, maps:keys(Layers)).
+% Implements a layer's connections ----------------------------------
 connect_nnodes(L1, Layers) -> 
     #{L1:=#{nnodes:=Nx1, connections:=Connections}} = Layers,
     Connect = fun(L2,T) -> connect(Nx1,nnodes(L2,Layers),T) end,

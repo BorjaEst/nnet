@@ -9,22 +9,25 @@
 -export([start_tables/0, info/1, all_networks/0]).
 -export([from_model/1, edit/1, clone/1, delete/1]).
 %% NNode operations (run inside 'fun edit/1') 
--export([rnode/1, wnode/2, out/1, out_seq/1, out_rcc/1, in/1]).
+-export([rnode/1, wnode/2, out/1, out_seq/1, out_rcc/1, in/1, lx/1]).
 %% Connections operations (run inside 'fun edit/1')
 -export([connect/1, connect_seq/1, connect_rcc/1, disconnect/1]).
 -export([move/2, reset/1]).
 %% Network operations
 -export([copy/2, clone/2, divide/2, split/2, delete/2, join/2]).
--export([make_input/2, make_output/2]).
 %% Exported types
 -export_type([id/0, nnode/0, link/0, info/0, model/0]).
 
--type id()        :: {network, reference()}.
+-type id()        :: network:id().
+-type network()   :: network:id().
 -type nnode()     :: nnode:id().
--type link()      :: {From::nnode(), To::nnode()}.
+-type nany()      :: nnode() | network().
+-type link()      :: {From::nany(), To::nany()}.
 -type result(Res) :: {'atomic', Res} | {aborted, Reason::term()}.
--type info()      :: network:info().
 -type model()     :: model:model().
+-type info()      :: #{nnodes  => #{nnode() => nnode},
+                       inputs  => [nnode()],
+                       outputs => [nnode()]}.
 
 
 %%%===================================================================
@@ -75,10 +78,11 @@ clone(Id) ->
     mnesia:transaction(
         fun() -> 
             NNodes = network:nnodes(Id),
+            Links  = lists:usort([lx(N) || N <- NNodes]),
             NMap   = map_clone(NNodes),
             Clone  = network:clone(Id),
             ok = network:rename(Clone, NMap),
-            [link:clone({From,To}, NMap) || {From,To} <- nnet:links(Id)],
+            ok = nnet:clone(Links, NMap#{Id => Clone}),
             Clone
         end
     ).
@@ -93,6 +97,8 @@ delete(Id) ->
         fun() -> 
             Nodes = network:nnodes(Id),
             ok = lists:foreach(fun(N) -> ok = delete(N,Id) end, Nodes),
+            Links = lx(Id),
+            ok = lists:foreach(fun(L) -> ok = link:del(L) end, Links),
             ok = network:delete(Id)
         end
     ).
@@ -102,8 +108,14 @@ delete(Id) ->
 %% @end
 %%-------------------------------------------------------------------
 -spec info(Id::id()) -> info().
-info(Id) -> 
-    network:info(Id).
+info(Id) ->
+    mnesia:transaction(
+        fun() -> 
+            #{nnodes  => network:nnodes(Id),
+              inputs  => in(Id),
+              outputs => out(Id)}
+        end
+    ). 
 
 %%-------------------------------------------------------------------
 %% @doc Returns a list with all networks.
@@ -145,13 +157,13 @@ rnode(NNode) ->
 %% Should run inside a nnet edit.
 %% @end
 %%-------------------------------------------------------------------
--spec out(NNode::nnode()) -> Out::[{NNode::nnode(), To::nnode()}].
+-spec out(From::nany()) -> Out::[{From::nany(), To::nany()}].
 out(NNode) -> lists:usort(link:seq(NNode) ++ link:rcc(NNode)).
 
--spec out_seq(NNode::nnode()) -> Out::[{NNode::nnode(), To::nnode()}].
+-spec out_seq(From::nany()) -> Out::[{From::nany(), To::nany()}].
 out_seq(NNode) -> link:seq(NNode).
 
--spec out_rcc(NNode::nnode()) -> Out::[{NNode::nnode(), To::nnode()}].
+-spec out_rcc(From::nany()) -> Out::[{From::nany(), To::nany()}].
 out_rcc(NNode) -> link:rcc(NNode).
 
 %%-------------------------------------------------------------------
@@ -159,8 +171,21 @@ out_rcc(NNode) -> link:rcc(NNode).
 %% Should run inside a nnet edit.
 %% @end
 %%-------------------------------------------------------------------
--spec in(NNode::nnode()) -> In::[{From::nnode(), NNode::nnode()}].
+-spec in(To::nany()) -> In::[{From::nany(), To::nany()}].
 in(NNode) -> link:in(NNode).
+
+%%-------------------------------------------------------------------
+%% @doc Returns all the nnode links.
+%% Should run inside a nnet edit.
+%% @end
+%%-------------------------------------------------------------------
+-spec lx(nany()) -> Links::[{From::nany(), To::nany()}].
+lx(NNode) ->
+    lists:usort(
+        lists:append([link:seq(NNode),
+                      link:rcc(NNode),
+                      link:in(NNode)])
+    ).
 
 
 %%%===================================================================
@@ -181,8 +206,8 @@ connect(Links) ->
 
 add_allowed_link({N1,N2}) ->
     case seq_path(N2, N1) of 
-        not_found -> ok = link:add({N1,N2}, seq, not_init);
-        _Path     -> ok = link:add({N1,N2}, rcc, not_init)
+        not_found -> link:add({N1,N2}, seq, not_init);
+        _Path     -> link:add({N1,N2}, rcc, not_init)
     end.
 
 %%-------------------------------------------------------------------
@@ -194,7 +219,7 @@ add_allowed_link({N1,N2}) ->
 %%-------------------------------------------------------------------
 -spec connect_seq(Links::[link()]) -> ok.
 connect_seq(Links) -> 
-    Add_SeqLink = fun(L) -> ok = link:add(L, seq, not_init) end,
+    Add_SeqLink = fun(L) -> link:add(L, seq, not_init) end,
     ok = lists:foreach(Add_SeqLink, Links).
 
 %%-------------------------------------------------------------------
@@ -204,7 +229,7 @@ connect_seq(Links) ->
 %%-------------------------------------------------------------------
 -spec connect_rcc(Links::[link()]) -> ok.
 connect_rcc(Links) -> 
-    Add_RccLink = fun(L) -> ok = link:add(L, rcc, not_init) end,
+    Add_RccLink = fun(L) -> link:add(L, rcc, not_init) end,
     ok = lists:foreach(Add_RccLink, Links).
 
 %%-------------------------------------------------------------------
@@ -215,7 +240,7 @@ connect_rcc(Links) ->
 %%-------------------------------------------------------------------
 -spec disconnect(Links::[link()]) -> ok.
 disconnect(Links) -> 
-    Del_Link = fun(L) -> ok = link:del(L) end,
+    Del_Link = fun(L) -> link:del(L) end,
     ok = lists:foreach(Del_Link, Links).
 
 %%-------------------------------------------------------------------
@@ -226,9 +251,8 @@ disconnect(Links) ->
 %%-------------------------------------------------------------------
 -spec move(Links::[link()], #{Old::nnode() => New::nnode()}) -> ok.
 move(Links, NMap) -> 
-    Move_Link = fun(L) -> ok = link:move(L,NMap) end,
+    Move_Link = fun(L) -> link:move(L,NMap) end,
     ok = lists:foreach(Move_Link, Links).
-
 
 %%-------------------------------------------------------------------
 %% @doc Reinitialises the weights of the input links. 
@@ -237,7 +261,7 @@ move(Links, NMap) ->
 %%-------------------------------------------------------------------
 -spec reset(Links::[link()]) -> ok. 
 reset(Links) -> 
-    Reset_Link = fun(L) -> ok = link:write(L,not_init) end,
+    Reset_Link = fun(L) -> link:write(L,not_init) end,
     ok = lists:foreach(Reset_Link, Links).
 
 
@@ -254,7 +278,7 @@ reset(Links) ->
 copy(NNode1, NNet) -> 
     #{NNode1 := NNode2} = NMap = map_clone([NNode1]),
     Copy_link = fun(L) -> ok = link:copy(L, NMap) end,
-    lists:foreach(Copy_link, in(NNode1)++out(NNode1)),
+    lists:foreach(Copy_link, lx(NNode1)),
     network:add_nnode(NNode2, NNet),
     NNode2.
 
@@ -267,7 +291,7 @@ copy(NNode1, NNet) ->
 clone(NNode1, NNet) -> 
     #{NNode1 := NNode2} = NMap = map_clone([NNode1]),
     Clone_link = fun(L) -> ok = link:clone(L, NMap) end,
-    lists:foreach(Clone_link, in(NNode1)++out(NNode1)),
+    lists:foreach(Clone_link, lx(NNode1)),
     network:add_nnode(NNode2, NNet),
     NNode2.
 
@@ -280,7 +304,7 @@ clone(NNode1, NNet) ->
 divide(NNode1, NNet) -> 
     #{NNode1 := NNode2} = NMap = map_clone([NNode1]),
     Divide_link = fun(L) -> ok = link:divide(L, NMap) end,
-    lists:foreach(Divide_link, in(NNode1)++out(NNode1)),
+    lists:foreach(Divide_link, lx(NNode1)),
     network:add_nnode(NNode2, NNet),
     NNode2.
 
@@ -307,7 +331,7 @@ split(NNode1, NNet) ->
 %%------------------------------------------------------------------- 
 -spec delete(NNode::nnode(), NNet::id()) -> ok.
 delete(NNode, NNet) -> 
-    Delete_link = fun(L) -> ok = link:delete(L) end,
+    Delete_link = fun(L) -> ok = link:del(L) end,
     lists:foreach(Delete_link, in(NNode)++out(NNode)),
     network:del_nnode(NNode, NNet),
     nnode:delete(NNode).
@@ -321,28 +345,8 @@ delete(NNode, NNet) ->
 -spec join({NNode1::nnode(), NNode2::nnode()}, NNet::id()) -> ok.
 join({NNode1, NNode1},    _) -> ok;
 join({NNode1, NNode2}, NNet) -> 
-    move(in(NNode1) ++ out(NNode1), #{NNode1 => NNode2}),
+    move(lx(NNode1), #{NNode1 => NNode2}),
     delete(NNode1, NNet).
-
-%%-------------------------------------------------------------------
-%% @doc Makes a nnode a network input. 
-%% Should run inside a nnet edit.
-%% @end
-%%-------------------------------------------------------------------
--spec make_input(NNode::nnode(), NNet::id()) -> ok.
-make_input(NNode, NNet) ->
-    network:add_input(NNode, NNet),
-    link:add({NNet,NNode}, seq, 1.0).
-
-%%-------------------------------------------------------------------
-%% @doc Makes a nnode a network input. 
-%% Should run inside a nnet edit.
-%% @end
-%%-------------------------------------------------------------------
--spec make_output(NNode::nnode(), NNet::id()) -> ok.
-make_output(NNode, NNet) ->
-    network:add_output(NNode, NNet),
-    link:add({NNode,NNet}, seq, 1.0). 
 
 
 %%====================================================================
@@ -390,8 +394,8 @@ random_split([A,B]) ->
         X when X < 0.5 -> [A];
         _              -> [B]
     end;
-random_split(Links) when is_list(Links) -> 
-    case ltools:rand(Links, 0-5) of 
+random_split([_,_|_] = Links) -> 
+    case ltools:rand(Links, 0.5) of 
         []    -> random_split(Links); 
         Links -> random_split(Links); 
         Other -> _Result = Other           

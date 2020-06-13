@@ -116,7 +116,7 @@ After a network is create, you can modify it using the functions:
 %% Connections operations (run inside 'fun edit/1')
 -export([connect/1, connect_seq/1, connect_rcc/1, disconnect/1]).
 -export([move/2, reset/1]).
-%% Network operations (run inside 'fun edit/1'
+%% Network operations (run inside 'fun edit/1')
 -export([copy/2, clone/2, divide/2, split/2, delete/2, join/2]).
 ```
 

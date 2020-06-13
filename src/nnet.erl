@@ -13,7 +13,7 @@
 %% Connections operations (run inside 'fun edit/1')
 -export([connect/1, connect_seq/1, connect_rcc/1, disconnect/1]).
 -export([move/2, reset/1]).
-%% Network operations
+%% Network operations (run inside 'fun edit/1'
 -export([copy/2, clone/2, divide/2, split/2, delete/2, join/2]).
 %% Exported types
 -export_type([id/0, nnode/0, link/0, info/0, model/0]).
@@ -113,8 +113,8 @@ info(Id) ->
     mnesia:transaction(
         fun() -> 
             #{nnodes  => network:nnodes(Id),
-              inputs  => in(Id),
-              outputs => out(Id)}
+              inputs  => out(Id), % Network inputs:  Network->NNode
+              outputs => in(Id)}  % Network outputs: NNode->Network
         end
     ). 
 

@@ -77,12 +77,13 @@ edit(Function) ->
 clone(Id) -> 
     mnesia:transaction(
         fun() -> 
-            NNodes = network:nnodes(Id),
-            Links  = lists:usort([lx(N) || N <- NNodes]),
+            NNodes = maps:keys(network:nnodes(Id)),
+            Links  = lists:usort(lists:append([lx(N) || N <- NNodes])),
             NMap   = map_clone(NNodes),
             Clone  = network:clone(Id),
             ok = network:rename(Clone, NMap),
-            ok = nnet:clone(Links, NMap#{Id => Clone}),
+            F = fun(L) -> ok = link:clone(L, NMap#{Id=>Clone}) end,
+            ok = lists:foreach(F, Links),
             Clone
         end
     ).
@@ -95,7 +96,7 @@ clone(Id) ->
 delete(Id) -> 
     mnesia:transaction(
         fun() -> 
-            Nodes = network:nnodes(Id),
+            Nodes = maps:keys(network:nnodes(Id)),
             ok = lists:foreach(fun(N) -> ok = delete(N,Id) end, Nodes),
             Links = lx(Id),
             ok = lists:foreach(fun(L) -> ok = link:del(L) end, Links),

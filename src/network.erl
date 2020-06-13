@@ -78,12 +78,12 @@ update_with(Fun, {network, Key}) ->
 %% Should run inside a mnesia transaction.
 %% @end
 %%-------------------------------------------------------------------
--spec map(Fun::function(), Id::id()) -> Id::id().
+-spec map(Fun::function(), Id::id()) -> ok.
 map(Fun, {network, Key}) -> 
     case mnesia:wread({network, Key}) of 
         [{network, Key, NNodes}] -> 
-            ok = mnesia:write({network, Key, maps:map(Fun, NNodes)}),
-            {network, Key};
+            ML = [{Fun(N),T} || {N,T} <- maps:to_list(NNodes)],
+            ok = mnesia:write({network, Key, maps:from_list(ML)});
         [] -> error(not_found)
     end. 
 
@@ -92,7 +92,7 @@ map(Fun, {network, Key}) ->
 %% Should run inside a mnesia transaction.
 %% @end
 %%-------------------------------------------------------------------
--spec rename(Id, NMap) -> Id when
+-spec rename(Id, NMap) -> ok when
     Id   :: id(),
     NMap :: #{Old::nnode:id() => New::nnode:id()}.
 rename(Id, NMap) -> 

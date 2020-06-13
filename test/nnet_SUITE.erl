@@ -116,6 +116,14 @@ end_per_testcase(_TestCase, _Config) ->
 %%--------------------------------------------------------------------
 groups() ->
     [
+        {in_sequence_main_operations, [sequence],
+         [
+             correct_clone,
+             correct_delete
+             % Inputs test
+             % Outputs test
+         ]
+        },
         {in_sequence_nnode_operations, [sequence, shuffle],
          [
              correct_rnode,
@@ -177,15 +185,11 @@ groups() ->
 %%--------------------------------------------------------------------
 all() ->
     [ 
+        {group, in_sequence_main_operations},
         {group, in_sequence_nnode_operations},
         {group, in_sequence_link_operations},
         {group, in_sequence_network_operations},
         {group, in_parallel_operations}
-        % Inputs test
-        % Outputs test
-        % Clone test
-        % Info test
-        % new/delete test
     ].
 
 
@@ -209,6 +213,50 @@ my_test_case_example(_Config) ->
 
 % --------------------------------------------------------------------
 % TESTS --------------------------------------------------------------
+
+% -------------------------------------------------------------------
+correct_clone(Config) ->
+    ?HEAD("Correct cloning ......................................."),
+    NN1 = ?config(network_id, Config),
+    {atomic, NN1_Info} = nnet:info(NN1),
+    ?INFO("Cloning network: ", {NN1, NN1_Info}),
+    {atomic, NN2} = nnet:clone(NN1),
+    {atomic, NN2_Info} = nnet:info(NN2),
+    ?INFO("New clone id: ", {NN2, NN2_Info}),
+    NN1_NNodes = map_get(nnodes, NN1_Info),
+    NN2_NNodes = map_get(nnodes, NN2_Info),    
+    true = maps:size(NN1_NNodes) == maps:size(NN2_NNodes),
+    NN1_Inputs = map_get(inputs, NN1_Info),
+    NN2_Inputs = map_get(inputs, NN2_Info),    
+    true = length(NN1_Inputs) == length(NN2_Inputs), 
+    NN1_Outputs = map_get(outputs, NN1_Info),
+    NN2_Outputs = map_get(outputs, NN2_Info),    
+    true = length(NN1_Outputs) == length(NN2_Outputs),
+    % Something else to test the connections??¿?
+    ?END({save_config, [{clone_id,NN2}]}).
+
+% -------------------------------------------------------------------
+correct_delete(Config) ->
+    ?HEAD("Correct delete ........................................"),
+    {correct_clone, Saved_config} = ?config(saved_config, Config),
+    NN2 = ?config(clone_id, Saved_config),
+    {atomic, NN2_Info} = nnet:info(NN2),
+    NN2_NNodes = map_get(nnodes, NN2_Info),
+    ?INFO("Deleting cloned network: ", NN2),
+    {atomic, ok} = nnet:delete(NN2),
+    {atomic, ok} = mnesia:transaction(
+        fun() -> 
+            [] = mnesia:read(NN2),
+            [] = nnet:in(NN2),
+            [] = nnet:out(NN2),
+            ?INFO("Check nnodes and links are deleted: ", NN2_NNodes),
+            [[] = mnesia:read(N) || N <- maps:keys(NN2_NNodes)],
+            [[] = nnet:in(N)     || N <- maps:keys(NN2_NNodes)],
+            [[] = nnet:out(N)    || N <- maps:keys(NN2_NNodes)],
+            ok
+        end
+    ),
+    ?END(ok).
 
 % -------------------------------------------------------------------
 correct_rnode(Config) ->

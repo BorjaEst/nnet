@@ -20,6 +20,16 @@
 %%% API
 %%%===================================================================
 
+%%-------------------------------------------------------------------
+%% @doc Mnesia table configuration for network.  
+%% @end
+%%-------------------------------------------------------------------
+-spec table_configuration() -> MnesiaConfig::[term()].
+table_configuration() -> 
+    [
+        {type, set}
+    ].
+
 %%--------------------------------------------------------------------
 %% @doc Creates a new nnode. Some properties can be defined.
 %% Should run inside a mnesia transaction
@@ -48,20 +58,19 @@ read({nnode, Key}) ->
 %% Should run inside a mnesia transaction
 %% @end
 %%--------------------------------------------------------------------
--spec copy(NNode::id()) -> Copy::id().
-copy(Id) -> new(read(Id)).
+-spec clone(NNode::id()) -> Copy::id().
+clone(Id) -> new(read(Id)).
 
 %%--------------------------------------------------------------------
 %% @doc Edits the nnode properties.
 %% Should run inside a mnesia transaction
 %% @end
 %%--------------------------------------------------------------------
--spec edit(Id::id(), NewData::data()) -> Id::id().
+-spec edit(Id::id(), NewData::data()) -> ok.
 edit({nnode, Key}, Prop) -> 
     case mnesia:wread({nnode, Key}) of 
         [{nnode, Key, Data}] -> 
-            ok = mnesia:write({nnode, Key, maps:merge(Data, Prop)}),
-            {nnode, Key};
+            mnesia:write({nnode, Key, maps:merge(Data, Prop)});
         []                    -> 
             error(not_found)
     end. 
@@ -73,8 +82,7 @@ edit({nnode, Key}, Prop) ->
 %%--------------------------------------------------------------------
 -spec delete(Id::id()) -> ok.
 delete({nnode, Key}) -> 
-    ok = mnesia:delete({nnode, Key}),
-    {nnode, Key}.
+    ok = mnesia:delete({nnode, Key}).
 
 
 %%====================================================================

@@ -33,9 +33,11 @@
 -spec compile(Model::model()) -> Network::enn:network().
 compile(#{inputs:=_, outputs:=_} = Model) -> 
     Layers = compile_layers(Model),
-    NNet_1 = compile_network(Layers),
-    NNet_2 = connect([start],nnodes(inputs, Layers),sequential,NNet_1),
-    _Net_3 = connect(nnodes(outputs, Layers),['end'],sequential,NNet_2).
+    NNet   = compile_network(Layers),
+    ok = connect_nnodes(Layers),
+    ok = connect_inputs( Layers, NNet) ,
+    ok = connect_outputs(Layers, NNet),
+    NNet.
 
 % Adds the nodes to the nnode specs ---------------------------------
 compile_layers(Model) -> 
@@ -44,9 +46,21 @@ compile(_Layer, #{units:=N, data:=Data} = Definition) ->
     Definition#{nnodes => [nnode:new(Data) || _ <- lists:seq(1, N)]}.
 
 % Implements the neural network frm model ---------------------------
-compile_network(Model) -> 
-    NNet = maps:fold(fun add_nnodes/3, network:new(), Model),
-    connect_nodes(NNet, Model).
+compile_network(Layers) -> 
+    lists:foldl(fun add_nnodes/2, network:new(), maps:values(Layers)).
+
+% Implements the layers connections ---------------------------------
+connect_nnodes(Layers) ->
+    Fun = fun(L) -> connect_nnodes(L, Layers) end,
+    ok = lists:foreach(Fun, maps:keys(Layers)).
+
+% Implements the network inputs connections -------------------------
+connect_inputs(Layers, NNet) ->
+    ok = nnet:connect_seq([{NNet,N} || N <- nnodes( inputs, Layers)]).
+
+% Implements the network outputs connections ------------------------
+connect_outputs(Layers, NNet) ->
+    ok = nnet:connect_seq([{N,NNet} || N <- nnodes(outputs, Layers)]).
 
 
 %%====================================================================
@@ -54,32 +68,29 @@ compile_network(Model) ->
 %%====================================================================
 
 % Adds the nnodes to the nnode map key ------------------------------
-add_nnodes(_Layer, #{nnodes:=NNodes}, NNet) -> 
+add_nnodes(#{nnodes:=NNodes}, NNet) -> 
     lists:foldl(fun network:add_nnode/2, NNet, NNodes).
 
 % Returns the nnodes from the Model map -----------------------------
-nnodes(Layer, Model) -> 
-    #{Layer:=#{nnodes:=NNodes}} = Model,
+nnodes(Layer, Layers) -> 
+    #{Layer:=#{nnodes:=NNodes}} = Layers,
     NNodes.
 
-% Implements the layers connections ---------------------------------
-connect_nodes(NNet, Model) ->
-    Fun = fun(L,NN) -> connect_nnodes(L,NN,Model) end,
-    lists:foldl(Fun, NNet, maps:keys(Model)).
-connect_nnodes(L1, NNet, Model) -> 
-    #{L1:=#{nnodes:=Nx1, connections:=Connections}} = Model,
-    Connect = fun(L2,T,NN) -> connect(Nx1,nnodes(L2,Model),T,NN) end,
-    maps:fold(Connect, NNet, Connections).
+% Implements a layer's connections ----------------------------------
+connect_nnodes(L1, Layers) -> 
+    #{L1:=#{nnodes:=Nx1, connections:=Connections}} = Layers,
+    Connect = fun(L2,T) -> connect(Nx1,nnodes(L2,Layers),T) end,
+    maps:map(Connect, Connections).
 
 % Connects 2 Groups of neurons according to the nature and density --
-connect(Nx1, Nx2, {sequential, Density}, NNet) -> 
-    nnet:connect_seq(links(Nx1,Nx2,Density), NNet);
-connect(Nx1, Nx2, {recurrent, Density}, NNet) ->  
-    nnet:connect_rcc(links(Nx1,Nx2,Density), NNet);
-connect(Nx1, Nx2, {auto, Density}, NNet) ->  
-    nnet:connect(links(Nx1,Nx2,Density), NNet);
-connect(Nx1, Nx2, Nature, NNet) -> 
-    connect(Nx1, Nx2, {Nature, 1.0}, NNet).
+connect(Nx1, Nx2, {sequential, Density}) -> 
+    nnet:connect_seq(links(Nx1, Nx2, Density));
+connect(Nx1, Nx2, {recurrent, Density}) ->  
+    nnet:connect_rcc(links(Nx1, Nx2, Density));
+connect(Nx1, Nx2, {auto, Density}) ->  
+    nnet:connect(links(Nx1, Nx2, Density));
+connect(Nx1, Nx2, Nature) -> 
+    connect(Nx1, Nx2, {Nature, 1.0}).
 
 % Retruns the list of links between 2 groups ------------------------
 links(Nx1, Nx2, 1.0) -> 

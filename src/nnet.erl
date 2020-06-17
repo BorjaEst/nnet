@@ -9,7 +9,8 @@
 -export([start_tables/0, info/1, all_networks/0]).
 -export([from_model/1, edit/1, clone/1, delete/1]).
 %% NNode operations (run inside 'fun edit/1') 
--export([rnode/1, wnode/2, out/1, out_seq/1, out_rcc/1, in/1, lx/1]).
+-export([rnode/1, wnode/2, rlink/1, wlink/2]).
+-export([out/1, out_seq/1, out_rcc/1, in/1, lx/1]).
 %% Connections operations (run inside 'fun edit/1')
 -export([connect/1, connect_seq/1, connect_rcc/1, disconnect/1]).
 -export([move/2, reset/1]).
@@ -132,17 +133,6 @@ all_networks() ->
 %%%===================================================================
 
 %%-------------------------------------------------------------------
-%% @doc Edits a nnode.
-%% Should run inside a nnet edit.
-%% @end
-%%-------------------------------------------------------------------
--spec wnode(NNode, Data) -> ok when 
-    NNode :: nnode(),
-    Data :: #{term() => term()}.
-wnode(NNode, Data) -> 
-    nnode:edit(NNode, Data).
-
-%%-------------------------------------------------------------------
 %% @doc Reads a nnode.
 %% Should run inside a nnet edit.
 %% @end
@@ -152,6 +142,39 @@ wnode(NNode, Data) ->
     Data  :: #{term() => term()}.
 rnode(NNode) -> 
     nnode:read(NNode).
+
+%%-------------------------------------------------------------------
+%% @doc Edits a nnode.
+%% Should run inside a nnet edit.
+%% @end
+%%-------------------------------------------------------------------
+-spec wnode(NNode, Data) -> ok when 
+    NNode :: nnode(),
+    Data  :: #{term() => term()}.
+wnode(NNode, Data) -> 
+    nnode:edit(NNode, Data).
+
+%%-------------------------------------------------------------------
+%% @doc Reads a link.
+%% Should run inside a nnet edit.
+%% @end
+%%-------------------------------------------------------------------
+-spec rlink(Link) -> Weight when 
+    Link   :: nnode(),
+    Weight :: number() | not_init.
+rlink(Link) -> 
+    link:read(Link).
+
+%%-------------------------------------------------------------------
+%% @doc Edits a link.
+%% Should run inside a nnet edit.
+%% @end
+%%-------------------------------------------------------------------
+-spec wlink(Link, Weight) -> ok when 
+    Link   :: nnode(),
+    Weight :: number() | not_init.
+wlink(Link, Weight) -> 
+    link:write(Link, Weight).
 
 %%-------------------------------------------------------------------
 %% @doc Returns the out links.

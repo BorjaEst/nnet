@@ -7,7 +7,7 @@
 
 %% API
 -export([start_tables/0, info/1, all_networks/0]).
--export([from_model/1, edit/1, clone/1, delete/1]).
+-export([from_model/1, clone/1, delete/1]).
 %% NNode operations (run inside 'fun edit/1') 
 -export([rnode/1, wnode/2, rlink/1, wlink/2]).
 -export([out/1, out_seq/1, out_rcc/1, in/1, lx/1]).
@@ -24,7 +24,6 @@
 -type nnode()     :: nnode:id().
 -type nany()      :: nnode() | network().
 -type link()      :: {From::nany(), To::nany()}.
--type result(Res) :: {'atomic', Res} | {aborted, Reason::term()}.
 -type model()     :: model:model().
 -type info()      :: #{nnodes  => #{nnode() => nnode},
                        inputs  => [nnode()],
@@ -52,75 +51,56 @@ start_tables() ->
 %%-------------------------------------------------------------------
 %% @doc Creates a new network from a model and returns its id.
 %% Layers "input" and "output" are mandatory.
+%% Should run inside a mnesia transaction.
 %% @end
 %%-------------------------------------------------------------------
--spec from_model(Model::model()) -> result(Id::id()).
+-spec from_model(Model::model()) -> Id::id().
 from_model(Model) -> 
-    mnesia:transaction(
-        fun() -> model:compile(Model) end
-    ).
-
-%%-------------------------------------------------------------------
-%% @doc Performs in a transaction the operations defined inside the 
-%% passed function.
-%% @end
-%%-------------------------------------------------------------------
--spec edit(Function) -> result(ok) when
-    Function :: function().
-edit(Function) -> 
-    mnesia:transaction(Function).
+    model:compile(Model).
 
 %%-------------------------------------------------------------------
 %% @doc Clones a network.
+%% Should run inside a mnesia transaction.
 %% @end
 %%-------------------------------------------------------------------
--spec clone(Id::id()) -> result(Clone::id()).
+-spec clone(Id::id()) -> Clone::id().
 clone(Id) -> 
-    mnesia:transaction(
-        fun() -> 
-            NNodes = maps:keys(network:nnodes(Id)),
-            Links  = lists:usort(lists:append([lx(N) || N <- NNodes])),
-            NMap   = map_clone(NNodes),
-            Clone  = network:clone(Id),
-            ok = network:rename(Clone, NMap),
-            F = fun(L) -> ok = link:clone(L, NMap#{Id=>Clone}) end,
-            ok = lists:foreach(F, Links),
-            Clone
-        end
-    ).
+    NNodes = maps:keys(network:nnodes(Id)),
+    Links  = lists:usort(lists:append([lx(N) || N <- NNodes])),
+    NMap   = map_clone(NNodes),
+    Clone  = network:clone(Id),
+    ok = network:rename(Clone, NMap),
+    F = fun(L) -> ok = link:clone(L, NMap#{Id=>Clone}) end,
+    ok = lists:foreach(F, Links),
+    Clone.
 
 %%-------------------------------------------------------------------
 %% @doc Deletes a network.
+%% Should run inside a mnesia transaction.
 %% @end
 %%-------------------------------------------------------------------
--spec delete(Id::id()) -> result(ok).
+-spec delete(Id::id()) -> ok.
 delete(Id) -> 
-    mnesia:transaction(
-        fun() -> 
-            Nodes = maps:keys(network:nnodes(Id)),
-            ok = lists:foreach(fun(N) -> ok = delete(N,Id) end, Nodes),
-            Links = lx(Id),
-            ok = lists:foreach(fun(L) -> ok = link:del(L) end, Links),
-            ok = network:delete(Id)
-        end
-    ).
+    Nodes = maps:keys(network:nnodes(Id)),
+    ok = lists:foreach(fun(N) -> ok = delete(N,Id) end, Nodes),
+    Links = lx(Id),
+    ok = lists:foreach(fun(L) -> ok = link:del(L) end, Links),
+    ok = network:delete(Id).
 
 %%-------------------------------------------------------------------
 %% @doc Returns network information.
+%% Should run inside a mnesia transaction.
 %% @end
 %%-------------------------------------------------------------------
 -spec info(Id::id()) -> info().
 info(Id) ->
-    mnesia:transaction(
-        fun() -> 
-            #{nnodes  => network:nnodes(Id),
-              inputs  => out(Id), % Network inputs:  Network->NNode
-              outputs => in(Id)}  % Network outputs: NNode->Network
-        end
-    ). 
+    #{nnodes  => network:nnodes(Id),
+      inputs  => out(Id), % Network inputs:  Network->NNode
+      outputs => in(Id)}. % Network outputs: NNode->Network
 
 %%-------------------------------------------------------------------
 %% @doc Returns a list with all networks.
+%% Should run inside a mnesia transaction.
 %% @end
 %%-------------------------------------------------------------------
 -spec all_networks() -> Ids::[id()].
@@ -134,7 +114,7 @@ all_networks() ->
 
 %%-------------------------------------------------------------------
 %% @doc Reads a nnode.
-%% Should run inside a nnet edit.
+%% Should run inside a mnesia transaction.
 %% @end
 %%-------------------------------------------------------------------
 -spec rnode(NNode) -> Data when 
@@ -145,7 +125,7 @@ rnode(NNode) ->
 
 %%-------------------------------------------------------------------
 %% @doc Edits a nnode.
-%% Should run inside a nnet edit.
+%% Should run inside a mnesia transaction.
 %% @end
 %%-------------------------------------------------------------------
 -spec wnode(NNode, Data) -> ok when 
@@ -156,7 +136,7 @@ wnode(NNode, Data) ->
 
 %%-------------------------------------------------------------------
 %% @doc Reads a link.
-%% Should run inside a nnet edit.
+%% Should run inside a mnesia transaction.
 %% @end
 %%-------------------------------------------------------------------
 -spec rlink(Link) -> Weight when 
@@ -167,7 +147,7 @@ rlink(Link) ->
 
 %%-------------------------------------------------------------------
 %% @doc Edits a link.
-%% Should run inside a nnet edit.
+%% Should run inside a mnesia transaction.
 %% @end
 %%-------------------------------------------------------------------
 -spec wlink(Link, Weight) -> ok when 
@@ -178,7 +158,7 @@ wlink(Link, Weight) ->
 
 %%-------------------------------------------------------------------
 %% @doc Returns the out links.
-%% Should run inside a nnet edit.
+%% Should run inside a mnesia transaction.
 %% @end
 %%-------------------------------------------------------------------
 -spec out(From::nany()) -> Out::[{From::nany(), To::nany()}].
@@ -192,7 +172,7 @@ out_rcc(NNode) -> link:rcc(NNode).
 
 %%-------------------------------------------------------------------
 %% @doc Returns the in links.
-%% Should run inside a nnet edit.
+%% Should run inside a mnesia transaction.
 %% @end
 %%-------------------------------------------------------------------
 -spec in(To::nany()) -> In::[{From::nany(), To::nany()}].
@@ -200,7 +180,7 @@ in(NNode) -> link:in(NNode).
 
 %%-------------------------------------------------------------------
 %% @doc Returns all the nnode links.
-%% Should run inside a nnet edit.
+%% Should run inside a mnesia transaction.
 %% @end
 %%-------------------------------------------------------------------
 -spec lx(nany()) -> Links::[{From::nany(), To::nany()}].
@@ -220,7 +200,7 @@ lx(NNode) ->
 %% @doc Adds links selecting automatically the nature.
 %% By default it implements a sequential, but creates recurrent in 
 %% case a dead lock is detected.
-%% Should run inside a nnet edit.
+%% Should run inside a mnesia transaction.
 %% @end
 %%-------------------------------------------------------------------
 -spec connect(Links::[link()]) -> ok.
@@ -238,7 +218,7 @@ add_allowed_link({N1,N2}) ->
 %% @doc Adds links as sequential to the network.
 %% If not used correctly might create dead locks, use connect/2 if
 %% you are not sure if a link would create a dead lock.
-%% Should run inside a nnet edit.
+%% Should run inside a mnesia transaction.
 %% @end
 %%-------------------------------------------------------------------
 -spec connect_seq(Links::[link()]) -> ok.
@@ -248,7 +228,7 @@ connect_seq(Links) ->
 
 %%-------------------------------------------------------------------
 %% @doc Adds links as recurrent.
-%% Should run inside a nnet edit.
+%% Should run inside a mnesia transaction.
 %% @end
 %%-------------------------------------------------------------------
 -spec connect_rcc(Links::[link()]) -> ok.
@@ -259,7 +239,7 @@ connect_rcc(Links) ->
 %%-------------------------------------------------------------------
 %% @doc Removes links. If the link did not existed nothing happens.
 %% Note it might break the network.
-%% Should run inside a nnet edit.
+%% Should run inside a mnesia transaction.
 %% @end
 %%-------------------------------------------------------------------
 -spec disconnect(Links::[link()]) -> ok.
@@ -270,7 +250,7 @@ disconnect(Links) ->
 %%-------------------------------------------------------------------
 %% @doc Moves the links using a map (Weights are merged).
 %% Note it might break the network.
-%% Should run inside a nnet edit.
+%% Should run inside a mnesia transaction.
 %% @end
 %%-------------------------------------------------------------------
 -spec move(Links::[link()], #{Old::nnode() => New::nnode()}) -> ok.
@@ -280,7 +260,7 @@ move(Links, NMap) ->
 
 %%-------------------------------------------------------------------
 %% @doc Reinitialises the weights of the input links. 
-%% Should run inside a nnet edit.
+%% Should run inside a mnesia transaction.
 %% @end
 %%-------------------------------------------------------------------
 -spec reset(Links::[link()]) -> ok. 
@@ -295,7 +275,7 @@ reset(Links) ->
 
 %%-------------------------------------------------------------------
 %% @doc Copies the nnode and connections, but not the weights.
-%% Should run inside a nnet edit.
+%% Should run inside a mnesia transaction.
 %% @end
 %%-------------------------------------------------------------------
 -spec copy(NNode1::nnode(), NNet::id()) -> NNode2::nnode().
@@ -308,7 +288,7 @@ copy(NNode1, NNet) ->
 
 %%-------------------------------------------------------------------
 %% @doc Copies the nnode, together with the link values.
-%% Should run inside a nnet edit.
+%% Should run inside a mnesia transaction.
 %% @end
 %%-------------------------------------------------------------------
 -spec clone(NNode1::nnode(), NNet::id()) -> NNode2::nnode().
@@ -321,7 +301,7 @@ clone(NNode1, NNet) ->
 
 %%-------------------------------------------------------------------
 %% @doc Clones the nnode, but new and old links are redeuced 50%. 
-%% Should run inside a nnet edit.
+%% Should run inside a mnesia transaction.
 %% @end
 %%-------------------------------------------------------------------
 -spec divide(NNode1::nnode(), NNet::id()) -> NNode2::nnode().
@@ -336,7 +316,7 @@ divide(NNode1, NNet) ->
 %% @doc Copies the nnode and distributes links (equal probability). 
 %% The original nnode must have at least 2 inputs and 2 outputs. 
 %% The result nnode will have at least 1 input and 1 output.
-%% Should run inside a nnet edit.
+%% Should run inside a mnesia transaction.
 %% @end
 %%-------------------------------------------------------------------
 -spec split(NNode1::nnode(), NNet::id()) -> NNode2::nnode().
@@ -350,7 +330,7 @@ split(NNode1, NNet) ->
 
 %%-------------------------------------------------------------------
 %% @doc Deletes a nnode together with all its connections and links.
-%% Should run inside a nnet edit.
+%% Should run inside a mnesia transaction.
 %% @end
 %%------------------------------------------------------------------- 
 -spec delete(NNode::nnode(), NNet::id()) -> ok.
@@ -363,7 +343,7 @@ delete(NNode, NNet) ->
 %%-------------------------------------------------------------------
 %% @doc Merges all inputs and outputs of all nnodes from left to 
 %% right. NNode1 is deleted after the operation.
-%% Should run inside a nnet edit.
+%% Should run inside a mnesia transaction.
 %% @end
 %%-------------------------------------------------------------------
 -spec join({NNode1::nnode(), NNode2::nnode()}, NNet::id()) -> ok.

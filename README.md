@@ -122,7 +122,7 @@ After a network is create, you can modify it using the functions:
 ```
 
 # More examples
-Inside the module **./src/nnet.erl** you will find the spec and comments for each function. Note that most of the functions are mnesia transactions therefore should run inside a `nnet:edit/1` context.
+Inside the module **./src/nnet.erl** you will find the spec and comments for each function. Note that most of the functions are mnesia transactions therefore should run inside a `mnesia:transaction/1` context.
 
 For examples of usage you can take a look on the test suite **./test/nnet_SUITE.erl**.
 

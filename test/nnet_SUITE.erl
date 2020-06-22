@@ -15,7 +15,7 @@
 
 -define(INFO(A,B),    ct:log(?LOW_IMPORTANCE,    "~p: ~p",   [A,B])).
 -define(ERROR(Error), ct:pal( ?HI_IMPORTANCE, "Error: ~p", [Error])).
--define(TEST(Fun, Network), nnet:edit(fun() -> Fun(Network) end)).
+-define(TEST(Fun, Network), mnesia:transaction(fun() -> Fun(Network) end)).
 
 -define(TEST_MODEL, #{inputs  => #{connections => #{
                                     layer1  => sequential,
@@ -70,7 +70,9 @@ end_per_suite(_Config) ->
 %% Reason = term()
 %%--------------------------------------------------------------------
 init_per_group(_GroupName, Config) ->
-    {atomic, Id} = nnet:from_model(?TEST_MODEL),
+    {atomic, Id} = mnesia:transaction(
+        fun() -> nnet:from_model(?TEST_MODEL) end
+    ),
     [{network_id, Id} | Config].
 
 %%--------------------------------------------------------------------
@@ -217,11 +219,15 @@ my_test_case_example(_Config) ->
 % -------------------------------------------------------------------
 correct_clone(Config) ->
     ?HEAD("Correct cloning ......................................."),
-    NN1 = ?config(network_id, Config),
-    {atomic, NN1_Info} = nnet:info(NN1),
+    {atomic, Result} = ?TEST(fun clone/1, 
+                             ?config(network_id, Config)),
+    ?END(Result).
+
+clone(NN1) ->
+    NN1_Info = nnet:info(NN1),
     ?INFO("Cloning network: ", {NN1, NN1_Info}),
-    {atomic, NN2} = nnet:clone(NN1),
-    {atomic, NN2_Info} = nnet:info(NN2),
+    NN2 = nnet:clone(NN1),
+    NN2_Info = nnet:info(NN2),
     ?INFO("New clone id: ", {NN2, NN2_Info}),
     NN1_NNodes = map_get(nnodes, NN1_Info),
     NN2_NNodes = map_get(nnodes, NN2_Info),    
@@ -239,23 +245,22 @@ correct_clone(Config) ->
 correct_delete(Config) ->
     ?HEAD("Correct delete ........................................"),
     {correct_clone, Saved_config} = ?config(saved_config, Config),
-    NN2 = ?config(clone_id, Saved_config),
-    {atomic, NN2_Info} = nnet:info(NN2),
+    {atomic, Result} = ?TEST(fun delete/1, 
+                             ?config(clone_id, Saved_config)),
+    ?END(Result).
+
+delete(NN2) ->
+    NN2_Info = nnet:info(NN2),
     NN2_NNodes = map_get(nnodes, NN2_Info),
     ?INFO("Deleting cloned network: ", NN2),
-    {atomic, ok} = nnet:delete(NN2),
-    {atomic, ok} = mnesia:transaction(
-        fun() -> 
-            [] = mnesia:read(NN2),
-            [] = nnet:in(NN2),
-            [] = nnet:out(NN2),
-            ?INFO("Check nnodes and links are deleted: ", NN2_NNodes),
-            [[] = mnesia:read(N) || N <- maps:keys(NN2_NNodes)],
-            [[] = nnet:in(N)     || N <- maps:keys(NN2_NNodes)],
-            [[] = nnet:out(N)    || N <- maps:keys(NN2_NNodes)],
-            ok
-        end
-    ),
+    ok = nnet:delete(NN2),
+    [] = mnesia:read(NN2),
+    [] = nnet:in(NN2),
+    [] = nnet:out(NN2),
+    ?INFO("Check nnodes and links are deleted: ", NN2_NNodes),
+    [[] = mnesia:read(N) || N <- maps:keys(NN2_NNodes)],
+    [[] = nnet:in(N)     || N <- maps:keys(NN2_NNodes)],
+    [[] = nnet:out(N)    || N <- maps:keys(NN2_NNodes)],
     ?END(ok).
 
 % -------------------------------------------------------------------

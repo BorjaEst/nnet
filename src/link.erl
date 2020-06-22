@@ -116,7 +116,7 @@ update_with(Fun, Link) ->
 
 %%-------------------------------------------------------------------
 %% @doc Returns the out links.
-%% Should run inside a nnet edit.
+%% Should run inside a mnesia transaction.
 %% @end
 %%-------------------------------------------------------------------
 -spec seq(From::from()) -> Out::[{From::from(), To::to()}].
@@ -129,7 +129,7 @@ rcc(From) ->
 
 %%-------------------------------------------------------------------
 %% @doc Returns the in links.
-%% Should run inside a nnet edit.
+%% Should run inside a mnesia transaction.
 %% @end
 %%-------------------------------------------------------------------
 -spec in(To::to()) -> In::[{From::from(), To::to()}].

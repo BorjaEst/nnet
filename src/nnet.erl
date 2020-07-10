@@ -4,9 +4,10 @@
 %%% @end
 %%%-------------------------------------------------------------------
 -module(nnet).
+-compile({no_auto_import,[nodes/1]}).
 
 %% API
--export([start_tables/0, info/1, all_networks/0]).
+-export([start_tables/0, info/2, nodes/1, all_networks/0]).
 -export([from_model/1, clone/1, delete/1]).
 %% NNode operations (run inside 'fun edit/1') 
 -export([rnode/1, wnode/2, rlink/1, wlink/2]).
@@ -88,15 +89,26 @@ delete(Id) ->
     ok = network:delete(Id).
 
 %%-------------------------------------------------------------------
+%% @doc Returns a map of all nnodes of the network.  
+%% @end
+%%-------------------------------------------------------------------
+-spec nodes(Id::id()) -> NNodes::#{nnode:id() => nnode}.
+nodes(Id) -> network:nnodes(Id).
+
+%%-------------------------------------------------------------------
 %% @doc Returns network information.
 %% Should run inside a mnesia transaction.
 %% @end
 %%-------------------------------------------------------------------
--spec info(Id::id()) -> info().
-info(Id) ->
-    #{nnodes  => network:nnodes(Id),
-      inputs  => out(Id), % Network inputs:  Network->NNode
-      outputs => in(Id)}. % Network outputs: NNode->Network
+-spec info(Id::id(), Item::term()) -> Info::term().
+info(Id,      in) ->  map_info(fun(X,_) ->  in(X)     end, Id);
+info(Id,     out) ->  map_info(fun(X,_) -> out(X)     end, Id);
+info(Id, out_seq) ->  map_info(fun(X,_) -> out_seq(X) end, Id);
+info(Id, out_rcc) ->  map_info(fun(X,_) -> out_rcc(X) end, Id).
+
+map_info(Function, Id) -> 
+    NNodes = nodes(Id),
+    maps:map(Function, NNodes#{Id => network}).
 
 %%-------------------------------------------------------------------
 %% @doc Returns a list with all networks.

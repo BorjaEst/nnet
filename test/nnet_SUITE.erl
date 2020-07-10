@@ -224,20 +224,14 @@ correct_clone(Config) ->
     ?END(Result).
 
 clone(NN1) ->
-    NN1_Info = nnet:info(NN1),
+    NN1_Info = nnet:info(NN1, out),
     ?INFO("Cloning network: ", {NN1, NN1_Info}),
     NN2 = nnet:clone(NN1),
-    NN2_Info = nnet:info(NN2),
+    NN2_Info = nnet:info(NN2, out),
     ?INFO("New clone id: ", {NN2, NN2_Info}),
-    NN1_NNodes = map_get(nnodes, NN1_Info),
-    NN2_NNodes = map_get(nnodes, NN2_Info),    
-    true = maps:size(NN1_NNodes) == maps:size(NN2_NNodes),
-    NN1_Inputs = map_get(inputs, NN1_Info),
-    NN2_Inputs = map_get(inputs, NN2_Info),    
-    true = length(NN1_Inputs) == length(NN2_Inputs), 
-    NN1_Outputs = map_get(outputs, NN1_Info),
-    NN2_Outputs = map_get(outputs, NN2_Info),    
-    true = length(NN1_Outputs) == length(NN2_Outputs),
+    true = maps:size(nnet:nodes(NN1)) == maps:size(nnet:nodes(NN2)),
+    true = length(nnet:in(NN1)) == length(nnet:in(NN2)), 
+    true = length(nnet:out(NN1)) == length(nnet:out(NN2)),
     % Something else to test the connections??¿?
     ?END({save_config, [{clone_id,NN2}]}).
 
@@ -250,8 +244,7 @@ correct_delete(Config) ->
     ?END(Result).
 
 delete(NN2) ->
-    NN2_Info = nnet:info(NN2),
-    NN2_NNodes = map_get(nnodes, NN2_Info),
+    NN2_NNodes = nnet:nodes(NN2),
     ?INFO("Deleting cloned network: ", NN2),
     ok = nnet:delete(NN2),
     [] = mnesia:read(NN2),

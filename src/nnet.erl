@@ -90,6 +90,7 @@ delete(Id) ->
 
 %%-------------------------------------------------------------------
 %% @doc Returns a map of all nnodes of the network.  
+%% Should run inside a mnesia transaction.
 %% @end
 %%-------------------------------------------------------------------
 -spec nodes(Id::id()) -> NNodes::#{nnode:id() => nnode}.

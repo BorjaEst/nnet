@@ -102,9 +102,9 @@ nid(Ref,   nnode, #{next:=Nid} = Context) ->
 %%====================================================================
 
 % Formats all the network sequential links --------------------------
-do_format_seq(#{id:=Id} = Context) -> 
+do_format_seq(#{id:=Id} = Context) ->
     [format_as_seq(L, Context) || 
-        Node <- maps:keys(nnet:nodes(Id)), 
+        Node <- [Id|maps:keys(nnet:nodes(Id))], 
            L <- link:seq(Node)
     ].
 
@@ -120,7 +120,7 @@ format_as_seq({A,B}, Context) ->
 % Formats all the network recurrent links ---------------------------
 do_format_rcc(#{id:=Id} = Context) -> 
     [format_as_rcc(L, Context) || 
-        Node <- maps:keys(nnet:nodes(Id)), 
+        Node <- [Id|maps:keys(nnet:nodes(Id))],
            L <- link:rcc(Node)
     ].
 

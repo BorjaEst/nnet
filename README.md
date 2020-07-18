@@ -130,7 +130,7 @@ To display the sequential connections use the output from: `umlnn:print_seq(Netw
 
 ![Image of sequential connections](doc/src/nnet_seq.png)
 
-To display the recurrent connectionsg use the output from: `umlnn:print_rcc(Network_id)`
+To display the recurrent connections use the output from: `umlnn:print_rcc(Network_id)`
 
 ![Image of recurrent connections](doc/src/nnet_rcc.png)
 

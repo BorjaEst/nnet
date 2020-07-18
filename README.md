@@ -125,9 +125,13 @@ After a network is create, you can modify it using the functions:
 # Visualization
 There is a secret (not so secret) module "umlnn" which prints/formats the neural network in UML format (components diagram).
 You can use the results of that function together with [plantUML](http://www.plantuml.com/plantuml/uml) to display your nerwork.
-Try the following: `umlnn:print_seq(Network_id)`
+
+To display the sequential connections: `umlnn:print_seq(Network_id)`
 
 ![Image of sequential connections](doc/src/nnet_seq.png)
+
+To display the recurrent connectionsg: `umlnn:print_rcc(Network_id)`
+
 ![Image of recurrent connections](doc/src/nnet_rcc.png)
 
 

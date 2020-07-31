@@ -8,7 +8,7 @@
 
 %% API
 -export([start_tables/0, info/2, nodes/1, all_networks/0]).
--export([from_model/1, clone/1, delete/1]).
+-export([from_model/1, compile/1, clone/1, delete/1]).
 %% NNode operations (run inside 'fun edit/1') 
 -export([rnode/1, wnode/2, rlink/1, wlink/2]).
 -export([out/1, out_seq/1, out_rcc/1, in/1, lx/1]).
@@ -57,6 +57,15 @@ start_tables() ->
 %%-------------------------------------------------------------------
 -spec from_model(Model::model()) -> Id::id().
 from_model(Model) -> 
+    model:compile(Model).
+
+%%-------------------------------------------------------------------
+%% @doc See "from_model/1"
+%% Should run inside a mnesia transaction.
+%% @end
+%%-------------------------------------------------------------------
+-spec compile(Model::model()) -> Id::id().
+compile(Model) -> 
     model:compile(Model).
 
 %%-------------------------------------------------------------------

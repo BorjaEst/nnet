@@ -224,10 +224,10 @@ correct_clone(Config) ->
     ?END(Result).
 
 clone(NN1) ->
-    NN1_Info = nnet:info(NN1, out),
+    NN1_Info = nnet:info(NN1),
     ?INFO("Cloning network: ", {NN1, NN1_Info}),
     NN2 = nnet:clone(NN1),
-    NN2_Info = nnet:info(NN2, out),
+    NN2_Info = nnet:info(NN2),
     ?INFO("New clone id: ", {NN2, NN2_Info}),
     true = maps:size(nnet:nodes(NN1)) == maps:size(nnet:nodes(NN2)),
     true = length(nnet:in(NN1)) == length(nnet:in(NN2)), 

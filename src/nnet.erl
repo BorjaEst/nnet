@@ -7,8 +7,8 @@
 -compile({no_auto_import,[nodes/1]}).
 
 %% API
--export([start_tables/0, info/2, nodes/1, all_networks/0]).
--export([from_model/1, compile/1, clone/1, delete/1]).
+-export([start_tables/0, info/1, size/1, nodes/1, all_networks/0]).
+-export([from_model/1, to_map/1, to_map/2, clone/1, delete/1]).
 %% NNode operations (run inside 'fun edit/1') 
 -export([rnode/1, wnode/2, rlink/1, wlink/2]).
 -export([out/1, out_seq/1, out_rcc/1, in/1, lx/1]).
@@ -26,9 +26,12 @@
 -type nany()      :: nnode() | network().
 -type link()      :: {From::nany(), To::nany()}.
 -type model()     :: model:model().
--type info()      :: #{nnodes  => #{nnode() => nnode},
-                       inputs  => [nnode()],
-                       outputs => [nnode()]}.
+-type info()      :: #{size    => integer(),  % Network size
+                       seq     => integer(),  % Sequential outputs
+                       rcc     => integer(),  % Reccurrent outputs
+                       in_conn => integer(),  % Input connections
+                       inputs  => integer(),  % Number of inputs
+                       outputs => integer()}. % Number of outputs
 
 
 %%%===================================================================
@@ -106,17 +109,46 @@ delete(Id) ->
 nodes(Id) -> network:nnodes(Id).
 
 %%-------------------------------------------------------------------
+%% @doc Returns a map of all nnodes of the network.  
+%% Should run inside a mnesia transaction.
+%% @end
+%%-------------------------------------------------------------------
+-spec size(Id::id()) -> Size::integer().
+size(Id) -> map_size(nodes(Id)).
+
+%%-------------------------------------------------------------------
 %% @doc Returns network information.
 %% Should run inside a mnesia transaction.
 %% @end
 %%-------------------------------------------------------------------
--spec info(Id::id(), Item::term()) -> Info::term().
-info(Id,      in) ->  map_info(fun(X,_) ->  in(X)     end, Id);
-info(Id,     out) ->  map_info(fun(X,_) -> out(X)     end, Id);
-info(Id, out_seq) ->  map_info(fun(X,_) -> out_seq(X) end, Id);
-info(Id, out_rcc) ->  map_info(fun(X,_) -> out_rcc(X) end, Id).
+-spec info(Id::id()) -> Info::info().
+info(Id) ->
+    NNodes = nodes(Id),
+    LNodes = maps:keys(NNodes),
+    #{
+        size    => map_size(NNodes),
+        out_seq => lists:sum([length(link:seq(N)) || N <- LNodes]),
+        out_rcc => lists:sum([length(link:rcc(N)) || N <- LNodes]),
+        in_conn => lists:sum([length(link:in(N))  || N <- LNodes]),
+        inputs  => length(out(Id)),
+        outputs => length(in(Id))
+    }.
 
-map_info(Function, Id) -> 
+%%-------------------------------------------------------------------
+%% @doc Returns network connections in a map format.
+%% Should run inside a mnesia transaction.
+%% @end
+%%-------------------------------------------------------------------
+-spec to_map(Id::id()) -> Map::term().
+to_map(Id) -> to_map(Id, out_seq).
+
+-spec to_map(Id::id(), Item::atom()) -> Map::term().
+to_map(Id,      in) ->  map_conn(fun(X,_) ->  in(X)     end, Id);
+to_map(Id,     out) ->  map_conn(fun(X,_) -> out(X)     end, Id);
+to_map(Id, out_seq) ->  map_conn(fun(X,_) -> out_seq(X) end, Id);
+to_map(Id, out_rcc) ->  map_conn(fun(X,_) -> out_rcc(X) end, Id).
+
+map_conn(Function, Id) -> 
     NNodes = nodes(Id),
     maps:map(Function, NNodes#{Id => network}).
 

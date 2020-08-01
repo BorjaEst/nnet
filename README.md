@@ -54,8 +54,7 @@ To create a network from a model it is very easy. Just create a map where each l
 - "data": The information on each node on each layer.
 
 ```erl
-2> {atomic, Id} = nnet:from_model(
-2>     #{inputs  => #{connections => #{
+2> M = #{inputs  => #{connections => #{
 2>                    layer1  => sequential,
 2>                    layer2  => {sequential,0.5}}, 
 2>                   units => 2, data=>#{}},
@@ -70,38 +69,38 @@ To create a network from a model it is very easy. Just create a map where each l
 2>       outputs => #{connections => #{
 2>                    inputs  => {recurrent, 0.5},
 2>                    layer2  => recurrent}, 
-2>                   units => 2, data=>#{}}}
-2> ).
-{atomic,{network,#Ref<0.2777356943.329777157.190811>}}
+2>                   units => 2, data=>#{}}}.
+...
+3> {atomic,Id} = mnesia:transaction(fun() -> nnet:from_model(M) end)
+{atomic,{network,#Ref<0.1530882211.2808086529.180929>}}
 ```
 
 ## Get the network nodes, inputs and outputs
-Using the function `nnet:info/1` you can retrieve the network data.
+Using the function `nnet:to_map/1` you can retrieve the network data.
 ```erl
-3> {atomic, #{nnodes:=NNodes}} = nnet:info(Id).
-{atomic,#{inputs =>
-              [{{network,#Ref<0.2777356943.329777157.190811>},
-                {nnode,#Ref<0.2777356943.329777157.190775>}},
-               {{network,#Ref<0.2777356943.329777157.190811>},
-                {nnode,#Ref<0.2777356943.329777157.190778>}}],
-          nnodes =>
-              #{{nnode,#Ref<0.2777356943.329777157.190775>} => nnode,
-                {nnode,#Ref<0.2777356943.329777157.190778>} => nnode,
-                {nnode,#Ref<0.2777356943.329777157.190781>} => nnode,
-                {nnode,#Ref<0.2777356943.329777157.190784>} => nnode,
-                {nnode,#Ref<0.2777356943.329777157.190787>} => nnode,
-                {nnode,#Ref<0.2777356943.329777157.190790>} => nnode,
-                {nnode,#Ref<0.2777356943.329777157.190793>} => nnode,
-                {nnode,#Ref<0.2777356943.329777157.190796>} => nnode,
-                {nnode,#Ref<0.2777356943.329777157.190799>} => nnode,
-                {nnode,#Ref<0.2777356943.329777157.190802>} => nnode,
-                {nnode,#Ref<0.2777356943.329777157.190805>} => nnode,
-                {nnode,#Ref<0.2777356943.329777157.190808>} => nnode},
-          outputs =>
-              [{{nnode,#Ref<0.2777356943.329777157.190805>},
-                {network,#Ref<0.2777356943.329777157.190811>}},
-               {{nnode,#Ref<0.2777356943.329777157.190808>}, 
-                {network,#Ref<0.2777356943.329777157.190811>}}]}}
+4> mnesia:transaction(fun() -> nnet:to_map(Id) end).
+{atomic,#{{network,#Ref<0.1530882211.2808086529.180929>} =>
+              [{{network,#Ref<0.1530882211.2808086529.180929>},
+                {nnode,#Ref<0.1530882211.2808086529.180893>}},
+               {{network,#Ref<0.1530882211.2808086529.180929>},
+                {nnode,#Ref<0.1530882211.2808086529.180896>}}],
+          {nnode,#Ref<0.1530882211.2808086529.180893>} =>
+              [{{nnode,#Ref<0.1530882211.2808086529.180893>},
+                {nnode,#Ref<0.1530882211.2808086529.180899>}},
+               {{nnode,#Ref<0.1530882211.2808086529.180893>},
+                {nnode,#Ref<0.1530882211.2808086529.180902>}},
+               {{nnode,#Ref<0.1530882211.2808086529.180893>},
+                {nnode,#Ref<0.1530882211.2808086529.180905>}},
+               {{nnode,#Ref<0.1530882211.2808086529.180893>},
+                {nnode,#Ref<0.1530882211.2808086529.180908>}},
+               {{nnode,#Ref<0.1530882211.2808086529.180893>},
+                {nnode,#Ref<0.1530882211.2808086529.180911>}},
+               {{nnode,#Ref<0.1530882211.2808086529.180893>},
+                {nnode,#Ref<0.1530882211.2808086529.180914>}}],
+...
+          {nnode,#Ref<0.1530882211.2808086529.180926>} =>
+              [{{nnode,#Ref<0.1530882211.2808086529.180926>},
+                {network,#Ref<0.1530882211.2808086529.180929>}}]}}
 ```
 > Note the network inputs are out(Network): Network -> NNode
 

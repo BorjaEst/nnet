@@ -7,13 +7,8 @@
 -compile({no_auto_import,[nodes/1]}).
 
 %% API
-<<<<<<< HEAD
 -export([start_tables/0, info/1, size/1, nodes/1, all_networks/0]).
 -export([from_model/1, to_map/1, to_map/2, clone/1, delete/1]).
-=======
--export([start_tables/0, info/2, nodes/1, all_networks/0]).
--export([from_model/1, compile/1, clone/1, delete/1]).
->>>>>>> origin/master
 %% NNode operations (run inside 'fun edit/1') 
 -export([rnode/1, wnode/2, rlink/1, wlink/2]).
 -export([out/1, out_seq/1, out_rcc/1, in/1, lx/1]).

@@ -120,6 +120,20 @@ After a network is create, you can modify it using the functions:
 -export([copy/2, clone/2, divide/2, split/2, delete/2, join/2]).
 ```
 
+
+# Visualization
+There is a secret (not so secret) module "umlnn" which prints/formats the neural network in UML format (components diagram).
+You can use the results of that function together with [plantUML](http://www.plantuml.com/plantuml/uml) to display your nerwork.
+
+To display the sequential connections use the output from: `umlnn:print_seq(Network_id)`
+
+![Image of sequential connections](doc/src/nnet_seq.png)
+
+To display the recurrent connections use the output from: `umlnn:print_rcc(Network_id)`
+
+![Image of recurrent connections](doc/src/nnet_rcc.png)
+
+
 # More examples
 Inside the module **./src/nnet.erl** you will find the spec and comments for each function. Note that most of the functions are mnesia transactions therefore should run inside a `mnesia:transaction/1` context.
 

@@ -368,6 +368,8 @@ correct_connect_auto(Config) ->
     ?HEAD("Correct auto connect of NNodes ........................."),
     {atomic, Result} = ?TEST(fun connect_auto/1, 
                              ?config(network_id, Config)),
+    {atomic, Result} = ?TEST(fun connect_selves/1, 
+                             ?config(network_id, Config)),
     ?END(Result).
 
 connect_auto(Network) -> 
@@ -379,6 +381,17 @@ connect_auto(Network) ->
     ?INFO("Connecting links as auto: ", Links),
     ok = nnet:connect(Links),
     [true = is_defined(Link) || Link <- Links],
+    ok.
+
+connect_selves(Network) -> 
+    Links = [{N,N} || N <- random_nnodes(Network)],
+    ?INFO("Removing Links: ", Links),
+    ok = nnet:disconnect(Links),
+    [false = is_defined(Link) || Link <- Links],
+    ?INFO("Connecting links as auto: ", Links),
+    ok = nnet:connect(Links),
+    [false = is_sequential(Link) || Link <- Links],
+    [true  = is_defined(Link)    || Link <- Links],
     ok.
 
 % -------------------------------------------------------------------
@@ -704,9 +717,7 @@ is_in_network(NNode, Network) ->
 is_defined({_,To} = Link) -> 
     ?HEAD("Is the link existing?"),
     ?INFO("Link: ", Link),
-    InLinks = nnet:in(To),
-    ?INFO("In links of To: ", InLinks),
-    ?END(lists:any(fun(X) -> X=:=Link end, InLinks)).
+    ?END(lists:any(fun(X) -> X=:=Link end, nnet:in(To))).
 
 % Checks the link exists and it is sequential -----------------------
 is_sequential({From,_} = Link) -> 

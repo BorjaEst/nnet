@@ -6,6 +6,8 @@
 -module(nnet).
 -compile({no_auto_import,[nodes/1]}).
 
+-include_lib("eunit/include/eunit.hrl").
+
 %% API
 -export([start_tables/0, info/1, size/1, nodes/1, all_networks/0]).
 -export([from_model/1, compile/1, to_map/1, to_map/2, clone/1, delete/1]).
@@ -264,8 +266,8 @@ connect(Links) ->
 
 add_allowed_link({N1,N2}) ->
     case seq_path(N2, N1) of 
-        not_found -> link:add({N1,N2}, seq, not_init);
-        _Path     -> link:add({N1,N2}, rcc, not_init)
+        false -> link:add({N1,N2}, seq, not_init);
+        _Path -> link:add({N1,N2}, rcc, not_init)
     end.
 
 %%-------------------------------------------------------------------
@@ -434,8 +436,8 @@ map_clone([N|Nx], NMap) -> map_clone(Nx, NMap#{N => nnode:clone(N)});
 map_clone(    [], NMap) -> NMap. 
 
 % Finds the sequential path between N1->N2 --------------------------
-seq_path(N1, N2) -> 
-    seq_path(out_seq(N1), N2, [], [N1], [N1]).
+seq_path(N1, N1) -> [N1];
+seq_path(N1, N2) -> seq_path(out_seq(N1), N2, [], [N1], [N1]).
 
 seq_path([W| _], W,    _,  _, Ps) -> lists:reverse([W|Ps]);
 seq_path([N|Ns], W, Cont, Xs, Ps) ->

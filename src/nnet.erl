@@ -311,8 +311,19 @@ disconnect(Links) ->
 %%-------------------------------------------------------------------
 -spec move(Links::[link()], #{Old::nnode() => New::nnode()}) -> ok.
 move(Links, NMap) -> 
-    Move_Link = fun(L) -> link:move(L,NMap) end,
+    Move_Link = fun(L) -> move_allowed_link(L,NMap) end,
     ok = lists:foreach(Move_Link, Links).
+
+move_allowed_link({N1,N2}, NMap) ->
+    case seq_path(N2, N1) of 
+        false -> link:move({N1,N2}, seq, NMap);
+        _Path -> link:move({N1,N2}, rcc, NMap)
+    end.
+
+
+
+
+
 
 %%-------------------------------------------------------------------
 %% @doc Reinitialises the weights of the input links. 

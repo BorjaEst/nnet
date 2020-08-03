@@ -192,6 +192,14 @@ move(Link, NMap) ->
     do_move(Link, map(Link, NMap)).
 
 do_move( Link,  Link) -> ok;
+do_move(FLink, TLink = {N,N}) -> 
+    case type(FLink) of 
+        Type when Type==seq; Type==rcc -> 
+            ok = merge(TLink, rcc, read(FLink)), 
+            ok = del(FLink);
+        undefined -> 
+            {error, {not_defined, {link, FLink}}}
+    end;
 do_move(FLink, TLink) -> 
     case type(FLink) of 
         Type when Type==seq; Type==rcc -> 

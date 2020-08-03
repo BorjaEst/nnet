@@ -6,8 +6,6 @@
 -module(nnet).
 -compile({no_auto_import,[nodes/1]}).
 
--include_lib("eunit/include/eunit.hrl").
-
 %% API
 -export([start_tables/0, info/1, size/1, nodes/1, all_networks/0]).
 -export([from_model/1, compile/1, to_map/1, to_map/2, clone/1, delete/1]).
@@ -265,7 +263,7 @@ connect(Links) ->
     lists:foreach(Add_AllowedLink, Links).
 
 add_allowed_link({N1,N2}) ->
-    case seq_path(N2, N1) of 
+    case link:seq_path({N2,N1}) of 
         false -> link:add({N1,N2}, seq, not_init);
         _Path -> link:add({N1,N2}, rcc, not_init)
     end.
@@ -315,15 +313,10 @@ move(Links, NMap) ->
     ok = lists:foreach(Move_Link, Links).
 
 move_allowed_link({N1,N2}, NMap) ->
-    case seq_path(N2, N1) of 
+    case link:seq_path(map_link({N2,N1}, NMap)) of 
         false -> link:move({N1,N2}, seq, NMap);
         _Path -> link:move({N1,N2}, rcc, NMap)
     end.
-
-
-
-
-
 
 %%-------------------------------------------------------------------
 %% @doc Reinitialises the weights of the input links. 
@@ -446,20 +439,9 @@ map_clone(NNodes)       -> map_clone(NNodes, #{}).
 map_clone([N|Nx], NMap) -> map_clone(Nx, NMap#{N => nnode:clone(N)});
 map_clone(    [], NMap) -> NMap. 
 
-% Finds the sequential path between N0->NX --------------------------
-seq_path(N0, N0) -> [N0];
-seq_path(N0, NX) -> seq_path(nseq_out(N0), NX, [], [N0], [N0]).
-
-seq_path([W| _], W,    _,  _, Ps) -> lists:reverse([W|Ps]);
-seq_path([N|Ns], W, Cont, Xs, Ps) ->
-    case lists:member(N, Xs) of
-	true  -> seq_path(Ns, W, Cont, Xs, Ps);
-	false -> seq_path(nseq_out(N), W, [{Ns,Ps}|Cont], [N|Xs], [N|Ps])
-    end;
-seq_path([], W, [{Ns,Ps}|Cont], Xs, _) -> seq_path(Ns, W, Cont, Xs, Ps);
-seq_path([], _,             [],  _, _) -> false.
-
-nseq_out(From) -> [{nnode,Ref} || {_,{nnode,Ref}} <- out_seq(From)]. 
+% Maps a link from a tuple {From,To} --------------------------------
+map_link({From, To}, NMap) ->
+    {maps:get(From, NMap, From), maps:get(To, NMap, To)}.
 
 % Returns a non empty/full list of random elements ------------------
 random_split([A,B]) -> 
@@ -484,85 +466,12 @@ random_split(_Other) ->
 % --------------------------------------------------------------------
 % TESTS DESCRIPTIONS -------------------------------------------------
 
-% Tests the seq path returns the sequential path --------------------
-seq_path_test_() ->
-    [{"seq_path/2 can find a seq path between N1 and N2",
-      {foreach, local, fun create_network/0, fun destroy_network/1,
-       [
-            fun path_to_self/1,
-            fun path_to_neighbour/1,
-            fun path_to_edge/1
-       ]
-     }}
-    ].
-
 % --------------------------------------------------------------------
 % SPECIFIC SETUP FUNCTIONS -------------------------------------------
-
-% Creates a network from a model ------------------------------------
--define(INPUTS,  #{connections => #{l1     =>sequential}, units=>1, data=>#{}}).
--define(LAYER1,  #{connections => #{outputs=>sequential}, units=>1, data=>#{}}).
--define(OUTPUTS, #{connections => #{},                    units=>1, data=>#{}}).
--define(MODEL,   #{inputs=>?INPUTS, l1=>?LAYER1, outputs=>?OUTPUTS}).
-create_network() -> 
-    mnesia:start(),
-    nnet:start_tables(),
-    {atomic, Result}  = mnesia:transaction(fun start_network/0),
-    Result.
-
-start_network() -> 
-    Network = nnet:compile(?MODEL),
-    [{Network, Input}] = nnet:out_seq(Network),
-    [{Input,  Hidden}] = nnet:out_seq(Input),
-    [{Hidden, Output}] = nnet:out_seq(Hidden),
-    #{network   => Network,
-      nn_input  => Input,
-      nn_hidden => Hidden,
-      nn_output => Output}.
-
-% Destroys the network ----------------------------------------------
-destroy_network(#{network := Network}) ->
-    {atomic, _} = mnesia:transaction(fun() -> nnet:delete(Network) end).
-
 
 % --------------------------------------------------------------------
 % ACTUAL TESTS -------------------------------------------------------
 
--define(t_assertEqual(Expected, Function), 
-    ?_assertEqual({atomic, Expected}, mnesia:transaction(Function))).
-
-% The path X->X is [X] ----------------------------------------------
-path_to_self(#{nn_input:=N1, nn_hidden:=N2, nn_output:=N3}) -> 
-    {inparallel, 
-        [
-            ?t_assertEqual([N1], fun() -> seq_path(N1, N1) end),
-            ?t_assertEqual([N2], fun() -> seq_path(N2, N2) end),
-            ?t_assertEqual([N3], fun() -> seq_path(N3, N3) end)
-        ]
-    }. 
-
-% The path X1->X2 is [X1,X2] otherwise false ------------------------
-path_to_neighbour(#{nn_input:=N1, nn_hidden:=N2, nn_output:=N3}) -> 
-    {inparallel, 
-        [
-            ?t_assertEqual([N1, N2], fun() -> seq_path(N1, N2) end),
-            ?t_assertEqual([N2, N3], fun() -> seq_path(N2, N3) end),
-            ?t_assertEqual(   false, fun() -> seq_path(N3, N2) end),
-            ?t_assertEqual(   false, fun() -> seq_path(N2, N1) end)
-        ]
-    }. 
-
-% The path X1->X2->X3 is [X1,X2,X3] otherwise false -----------------
-path_to_edge(#{nn_input:=N1, nn_hidden:=N2, nn_output:=N3}) -> 
-    {inparallel, 
-        [
-            ?t_assertEqual([N1, N2, N3], fun() -> seq_path(N1, N3) end),
-            ?t_assertEqual(       false, fun() -> seq_path(N3, N1) end)
-        ]
-    }. 
-
 % --------------------------------------------------------------------
 % SPECIFIC HELPER FUNCTIONS ------------------------------------------
-
-
 

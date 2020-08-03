@@ -108,7 +108,8 @@ groups() ->
              correct_seq,
              correct_rcc,
              correct_in,
-             correct_move
+             correct_move,
+             correct_seq_path
          ]
         }
         % {in_parallel_operations, [parallel, shuffle],
@@ -333,6 +334,31 @@ correct_move(_Config) ->
             [false = is_in_rccTable(L)  || L <- [{a,b}, {a,a}]],
             true = is_weight({b,c}, 1.0), 
             true = is_weight({b,b}, 2.0), 
+            ok
+        end
+    ),
+    ?END(Result).
+
+% -------------------------------------------------------------------
+correct_seq_path(_Config) ->
+    ?HEAD("Correct find of sequential path ......................."),
+    {atomic, Result} = mnesia:transaction(
+        fun() -> 
+            Links =  [{a,b},{b,c},{c,d}],
+            ?INFO("Writing seq links: ", Links),
+            [ok = link:add(L, seq, 1.0) || L <- Links],
+            ?INFO("Evaluating links for path: ", path_to_self),
+            [a] = link:seq_path({a,a}),
+            [b] = link:seq_path({b,b}),
+            [c] = link:seq_path({c,c}),
+            ?INFO("Evaluating links for path: ", path_to_neighbour),
+            [a,b] = link:seq_path({a,b}),
+            [b,c] = link:seq_path({b,c}),
+            false = link:seq_path({b,a}),
+            false = link:seq_path({c,b}),
+            ?INFO("Evaluating links for path: ", path_to_edge),
+            [a,b,c] = link:seq_path({a,c}),
+            false   = link:seq_path({c,a}),
             ok
         end
     ),

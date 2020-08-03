@@ -5,6 +5,8 @@
 -module(link).
 -compile([export_all, nowarn_export_all]). %% TODO: To delete after buil
 
+-include_lib("eunit/include/eunit.hrl").
+
 -export([]).
 -export_type([from/0, to/0, weight/0, nature/0]).
 
@@ -192,6 +194,10 @@ do_clone(FLink, TLink) ->
 move(Link, AsType, NMap) ->  
     do_move(Link, AsType, map(Link, NMap)).
 
+
+%Here goes he evaluation if seq or rcc
+
+
 do_move( Link,      _,  Link) -> ok;
 do_move(FLink, AsType, TLink) -> 
     case type(FLink) of 
@@ -225,6 +231,32 @@ do_divide(FLink, TLink) ->
         undefined -> 
             {error, {not_defined, {link, FLink}}}
     end.
+
+%%-------------------------------------------------------------------
+%% @doc Finds the sequential path between two nodes. 
+%% Should run inside a mnesia transaction.
+%% @end
+%%-------------------------------------------------------------------
+-spec seq_path(Link) -> Path | false when 
+    Link :: {N0::from(), NX::to()},
+    Path :: [Node::term()].
+seq_path({From, From}) -> [From];
+seq_path({From,   To}) -> seq_path(nout(From), To, [], [From], [From]).
+
+seq_path([W| _], W,    _,  _, Ps) -> lists:reverse([W|Ps]);
+seq_path([N|Ns], W, Cont, Xs, Ps) ->
+    case lists:member(N, Xs) of
+	true  -> seq_path(Ns, W, Cont, Xs, Ps);
+	false -> seq_path(nout(N), W, [{Ns,Ps}|Cont], [N|Xs], [N|Ps])
+    end;
+seq_path([], W, [{Ns,Ps}|Cont], Xs, _) -> seq_path(Ns, W, Cont, Xs, Ps);
+seq_path([], _,             [],  _, _) -> false.
+
+nout(From) -> nto(seq(From)). 
+
+nto([{_,{network,_}}|OutX]) ->     nto(OutX) ;
+nto([{_,         To}|OutX]) -> [To|nto(OutX)];
+nto([])                     -> [].
 
 
 %%====================================================================

@@ -185,27 +185,30 @@ do_clone(FLink, TLink) ->
 %% Should run inside a mnesia transaction.
 %% @end
 %%-------------------------------------------------------------------
--spec move(Link, Type, #{Old => New}) -> ok | {error, Reason} when 
+-spec move(Link, #{Old => New}) -> ok | {error, Reason} when 
     Link :: {Old::from(), Old::to()},
     Old  :: from() | to(),
-    Type ::nature(),
     New  :: from() | to(),
     Reason :: {not_defined, {link, Link}}.
-move(Link, AsType, NMap) ->  
-    do_move(Link, AsType, map(Link, NMap)).
+move(Link, NMap) ->  
+    do_move(Link, map(Link, NMap)).
 
-
-%Here goes he evaluation if seq or rcc
-
-
-do_move( Link,      _,  Link) -> ok;
-do_move(FLink, AsType, TLink) -> 
+do_move( Link,            Link) -> ok;
+do_move(FLink, {TN1,TN2}=TLink) -> 
     case type(FLink) of 
-        Type when Type==seq; Type==rcc -> 
-            ok = merge(TLink, AsType, read(FLink)), 
-            ok = del(FLink);
+        rcc -> 
+                    ok = merge(TLink, rcc, read(FLink)), 
+                    ok = del(FLink);    
+        seq -> case seq_path({TN2,TN1}) of 
+                false -> 
+                    ok = merge(TLink, seq, read(FLink)), 
+                    ok = del(FLink);
+                _Path -> 
+                    ok = merge(TLink, rcc, read(FLink)), 
+                    ok = del(FLink)
+                end;
         undefined -> 
-            {error, {not_defined, {link, FLink}}}
+                    {error, {not_defined, {link, FLink}}}
     end.
 
 %%-------------------------------------------------------------------

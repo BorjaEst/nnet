@@ -328,7 +328,7 @@ correct_move(_Config) ->
             [ok = link:add(L, seq, 1.0) || L <- Links],
             NMap = #{a=>b},
             ?INFO("Moving links: ", NMap),
-            [ok = link:move(L,seq,NMap) || L <- Links],
+            [ok    = link:move(L,NMap)  || L <- Links],
             [false = is_in_inTable(L)   || L <- [{a,b}, {a,a}]],
             [false = is_in_seqTable(L)  || L <- [{a,b}, {a,a}]],
             [false = is_in_rccTable(L)  || L <- [{a,b}, {a,a}]],

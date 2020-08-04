@@ -433,10 +433,6 @@ map_clone(NNodes)       -> map_clone(NNodes, #{}).
 map_clone([N|Nx], NMap) -> map_clone(Nx, NMap#{N => nnode:clone(N)});
 map_clone(    [], NMap) -> NMap. 
 
-% Maps a link from a tuple {From,To} --------------------------------
-map_link({From, To}, NMap) ->
-    {maps:get(From, NMap, From), maps:get(To, NMap, To)}.
-
 % Returns a non empty/full list of random elements ------------------
 random_split([A,B]) -> 
     case rand:uniform() of 

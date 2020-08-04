@@ -18,7 +18,9 @@
 %%-------------------------------------------------------------------
 -spec print(Id::nnet:id()) -> ok.
 print(Id) -> 
-    Format = format(Id),
+    {atomic, Format} = mnesia:transaction(
+        fun() -> format(Id) end
+    ),
     ok = io:format(Format).
 
 %%-------------------------------------------------------------------
@@ -28,7 +30,9 @@ print(Id) ->
 %%-------------------------------------------------------------------
 -spec print_seq(Id::nnet:id()) -> ok.
 print_seq(Id) -> 
-    Format = format_seq(Id),
+    {atomic, Format} = mnesia:transaction(
+        fun() -> format_seq(Id) end
+    ),
     ok = io:format(Format). 
 
 %%-------------------------------------------------------------------
@@ -38,50 +42,43 @@ print_seq(Id) ->
 %%-------------------------------------------------------------------
 -spec print_rcc(Id::nnet:id()) -> ok.
 print_rcc(Id) -> 
-    Format = format_rcc(Id),
+    {atomic, Format} = mnesia:transaction(
+        fun() -> format_rcc(Id) end
+    ),
     ok = io:format(Format). 
 
 %%-------------------------------------------------------------------
 %% @doc Returns the network print format in UML format.
+%% Should run inside a mnesia transaction.
 %% @end
 %%-------------------------------------------------------------------
 -spec format(Id::nnet:id()) -> io_lib:chars().
 format(Id) -> 
-    {atomic, Format} = mnesia:transaction(
-        fun() -> 
-            Context = new_context(Id),
-            [do_format_seq(Context),
-             do_format_rcc(Context)]
-        end),
-    Format.
+    Context = new_context(Id),
+    [do_format_seq(Context),
+     do_format_rcc(Context)].
 
 %%-------------------------------------------------------------------
 %% @doc Prints on shell the network and its connections in UML format.
 %% This case only prints the sequential connections.
+%% Should run inside a mnesia transaction.
 %% @end
 %%-------------------------------------------------------------------
 -spec format_seq(Id::nnet:id()) -> io_lib:chars().
 format_seq(Id) -> 
-    {atomic, Format} = mnesia:transaction(
-        fun() -> 
-            Context = new_context(Id),
-            do_format_seq(Context)
-        end),
-    Format. 
+    Context = new_context(Id),
+    do_format_seq(Context).
 
 %%-------------------------------------------------------------------
 %% @doc Prints on shell the network and its connections in UML format.
 %% This case only prints the recurrent connections.
+%% Should run inside a mnesia transaction.
 %% @end
 %%-------------------------------------------------------------------
 -spec format_rcc(Id::nnet:id()) -> io_lib:chars().
 format_rcc(Id) -> 
-    {atomic, Format} = mnesia:transaction(
-        fun() -> 
-            Context = new_context(Id),
-            do_format_rcc(Context)
-        end),
-    Format. 
+    Context = new_context(Id),
+    do_format_rcc(Context).
 
 
 %%====================================================================
